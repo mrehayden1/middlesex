@@ -24,11 +24,17 @@ dependencies:
 - GLFW-b
 - GPipe
 - GPipe-GLFW
+- JuicyPixels
+- aeson
+- bytestring
+- containers
 - dependent-sum
 - exception-transformers
+- linear
 - mtl
 - reflex
 - time
+- vector
 
 ghc-options:
 - -Wall
@@ -43,7 +49,9 @@ ghc-options:
 
 default-extensions:
 - ConstraintKinds
+- DeriveGeneric
 - FlexibleContexts
+- OverloadedStrings
 - RecordWildCards
 - ScopedTypeVariables
 

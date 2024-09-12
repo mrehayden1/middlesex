@@ -18,6 +18,7 @@ import Reflex
 
 import App.Graphics hiding (initialise)
 import qualified App.Graphics as Graphics
+import App.Graphics.Text.Font
 
 windowHeight, windowWidth :: Int
 windowHeight = 1080
@@ -38,6 +39,7 @@ type App os t m = (MonadIO m, MonadIO (Performable m),
   PostBuild t m, TriggerEvent t m)
 
 data Env os = Env {
+    envFont :: Font os,
     envVertexBuffer :: Buffer os (B4 Float, B3 Float),
     envWindow :: Window os RGBFloat ()
   }
@@ -59,5 +61,6 @@ initialise name = do
           configWidth = windowWidth
         }
   Env
-    <$> Graphics.initialise
+    <$> loadFont
+    <*> Graphics.initialise
     <*> newWindow (WindowFormatColor RGB8) windowConfig

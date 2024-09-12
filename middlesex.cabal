@@ -28,12 +28,17 @@ executable middlesex-exe
   other-modules:
       App.Env
       App.Graphics
+      App.Graphics.Text.Font
+      App.Graphics.Text.Font.Atlas
+      App.Graphics.Texture
       Paths_middlesex
   hs-source-dirs:
       src
   default-extensions:
       ConstraintKinds
+      DeriveGeneric
       FlexibleContexts
+      OverloadedStrings
       RecordWildCards
       ScopedTypeVariables
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -threaded -rtsopts -with-rtsopts=-N
@@ -41,10 +46,16 @@ executable middlesex-exe
       GLFW-b
     , GPipe
     , GPipe-GLFW
+    , JuicyPixels
+    , aeson
     , base >=4.7 && <5
+    , bytestring
+    , containers
     , dependent-sum
     , exception-transformers
+    , linear
     , mtl
     , reflex
     , time
+    , vector
   default-language: Haskell2010
