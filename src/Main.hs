@@ -1,5 +1,5 @@
 module Main (
- main
+  main
 ) where
 
 import Control.Concurrent
@@ -10,7 +10,6 @@ import Data.Dependent.Sum
 import Data.Foldable
 import Data.Maybe
 import Data.IORef
-import Data.Time.Clock
 import Data.Traversable
 import Reflex hiding (mapMaybe)
 import Reflex.Host.Class
@@ -26,20 +25,15 @@ version = "0.1.0"
 
 data Output t = Output {
     outputQuit :: Event t (),
-    outputScene :: Event t (),
-    outputTickTrigger :: UTCTime -> IO ()
+    outputScene :: Event t ()
   }
 
-start :: forall os t m. App os t m => Event t () -> m (Output t)
-start eKey = do
-  -- Create a tick trigger event so the Reflex host can tick after each time it
-  -- renders a frame.
-  (eTick, tickTrigger) <- newTriggerEvent
-
+start :: forall os t m. App os t m => m (Output t)
+start = do
+  Env{..} <- ask
   return $ Output {
-      outputQuit = void eKey,
-      outputScene = void eTick,
-      outputTickTrigger = tickTrigger
+      outputQuit = void envEKey,
+      outputScene = void envETick
     }
 
 main :: IO ()
@@ -54,28 +48,11 @@ main = do
 
   eventsChan <- newChan
 
-  -- NB: This first dollar is to keep the type checker happy (without
-  -- ImpredicativeTypes), otherwise the Rank-2 type parameter `os` escapes.
+  -- NB: This first dollar is to keep the type checker happy, otherwise the
+  -- Rank-2 type parameter `os` escapes.
   runSpiderHost $ runContextT defaultHandleConfig $ do
-    env@Env{..} <- initialise name
-
-    shader <- compileShader $ do
-      primitiveStream <- toPrimitiveStream id
-      let primitiveStream2 = flip fmap primitiveStream $ \(pos, clr) ->
-            (pos + V4 0.3 0.3 0 0, clr * 2)
-      let primitiveStream3 = primitiveStream `mappend` primitiveStream2
-      fragmentStream <- flip rasterize primitiveStream3 . const $
-         (FrontAndBack,
-          ViewPort (V2 0 0) (V2 windowWidth windowHeight),
-          DepthRange 0 1
-         )
-      drawWindowColor
-        (const (envWindow, ContextColorOption NoBlending (V3 True True True)))
-        fragmentStream
-
-    -- Create input events.
-    (eKey, keyTrigger) <- lift . runTriggerEventT newTriggerEvent $ eventsChan
-    _ <- setKeyCallback envWindow . Just $ \_ _ _ _ -> keyTrigger ()
+    (env, renderScene, windowShouldClose', tickTrigger) <-
+      flip runTriggerEventT eventsChan . initialise $ name
 
     -- Create post build event.
     (ePostBuild, postBuildTriggerRef) <- lift newEventWithTriggerRef
@@ -85,7 +62,7 @@ main = do
       . flip runPostBuildT ePostBuild
       . flip runTriggerEventT eventsChan
       . flip runReaderT env
-      $ start eKey
+      $ start
 
     -- Event handles - for reading current `Event` values, which may or may not
     -- have been produced since the last frame.
@@ -97,22 +74,14 @@ main = do
           putStrLn "Exiting..."
           exitSuccess
 
-    let doRender = render $ do
-          clearWindowColor envWindow (V3 0 0 0)
-          vertexArray <- newVertexArray envVertexBuffer
-          let primitiveArray = toPrimitiveArray TriangleStrip vertexArray
-          shader primitiveArray
-
     -- Processes event outputs. There will be a list of outputs, one for each
     -- event triggered so we have to process them all accordingly.
     let handleOutput outs = do
           -- Any quit event should cause the application to exit.
           mapM_ (const $ liftIO exit) . mapMaybe fst $ outs
           -- Render the latest Picture output.
-          mapM_ (const doRender) . listToMaybe . mapMaybe snd . reverse $ outs
-          -- Swap buffers. Also polls the window for events which will collect
-          -- any `TriggerEvent` events dispatched by GLFW callbacks.
-          swapWindowBuffers envWindow
+          mapM_ (const renderScene) . listToMaybe . mapMaybe snd . reverse
+            $ outs
 
     -- Reads output event handles and sequences any actions by PerformEvent
     -- methods.
@@ -139,7 +108,7 @@ main = do
       Just trigger -> lift $ fire [trigger :=> Identity ()] readPhase
     handleOutput out
 
-    liftIO $ outputTickTrigger =<< getCurrentTime
+    liftIO $ tickTrigger () -- =<< getCurrentTime
 
     -- Main loop.
     fix $ \loop -> do
@@ -151,7 +120,8 @@ main = do
 
       -- Call the tick trigger after we render so we know how long the last
       -- frame took and so there's an event in the chan.
-      liftIO $ outputTickTrigger =<< getCurrentTime
+      liftIO $ tickTrigger () -- =<< getCurrentTime
 
-      closeRequested <- windowShouldClose envWindow
-      unless (closeRequested == Just True) loop
+      closeRequested <- windowShouldClose'
+      liftIO . when (closeRequested == Just True) $ exit
+      loop

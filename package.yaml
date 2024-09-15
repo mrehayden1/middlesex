@@ -33,6 +33,7 @@ dependencies:
 - linear
 - mtl
 - reflex
+- ref-tf
 - time
 - vector
 
@@ -51,9 +52,13 @@ default-extensions:
 - ConstraintKinds
 - DeriveGeneric
 - FlexibleContexts
+- FlexibleInstances
+- MultiParamTypeClasses
 - OverloadedStrings
 - RecordWildCards
 - ScopedTypeVariables
+- TypeFamilies
+- UndecidableInstances
 
 executables:
   middlesex-exe:

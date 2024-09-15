@@ -2,6 +2,9 @@ module App.Graphics.Text.Font (
   Font(..),
   loadFont,
 
+  Advance,
+  GlyphVertex,
+
   TypefaceI,
   headingTypeface,
   debugTypeface
@@ -10,6 +13,7 @@ module App.Graphics.Text.Font (
 
 import Control.Monad.IO.Class
 import Data.IntMap (IntMap)
+import Data.Maybe
 import Data.Vector (Vector)
 import Graphics.GPipe
 
@@ -37,6 +41,8 @@ debugTypeface   = 1
 -- graphics memory.
 data Font os = Font {
   fontGlyphTexture :: Texture2D os (Format RGBFloat),
+  fontSize :: Float,
+  fontSdfUnitRange :: Float,
   -- Glyph geometry and the advance (the distance to move the cursor to draw
   -- the next character).
   fontTypefaces :: Vector (Glyphs os)
@@ -44,10 +50,10 @@ data Font os = Font {
 
 type Advance = Float
 
-type Glyphs os = IntMap (Maybe (Buffer os GlyphGeometry), Advance)
+type Glyphs os = IntMap ([GlyphVertex], Advance)
 
 -- Vertices (positions & texture co-ordinates
-type GlyphGeometry = (B2 Float, B2 Float)
+type GlyphVertex = (V2 Float, V2 Float)
 
 
 loadFont :: (ContextHandler ctx, MonadIO m)
@@ -56,29 +62,24 @@ loadFont = do
   Atlas{..} <- liftIO . fmap (either error id)
     . decodeAtlasFromFile $ metadataFilePath
   -- Load the glyphs into the glyph texture
-  t <- fromPNG glyphsFilePath
-  vs <- mapM (makeGlyphs atlasMeta) variants
-  return $ Font t vs
+  texture <- fromPNG glyphsFilePath
+  let vs = fmap (makeGlyphs atlasMeta) variants
+      AtlasMeta{..} = atlasMeta
+  return $ Font texture size distanceRange vs
 
-makeGlyphs :: (ContextHandler ctx, MonadIO m)
-  => AtlasMeta
-  -> Variant
-  -> ContextT ctx os m (Glyphs os)
+makeGlyphs :: AtlasMeta -> Variant -> Glyphs os
 makeGlyphs meta Variant{..} =
-  mapM (makeGlyph meta) . unGlyphMap $ glyphs
+  fmap (makeGlyph meta) . unGlyphMap $ glyphs
 
 -- Creates glpyh geometry relative to a cursor at the origin and returns the
 -- advance of the cursor for the next character.
-makeGlyph :: forall ctx os m. (ContextHandler ctx, MonadIO m)
-  => AtlasMeta
-  -> Glyph
-  -> ContextT ctx os m (Maybe (Buffer os GlyphGeometry), Advance)
-makeGlyph AtlasMeta{..} Glyph{..} = do
-  b <- sequence $ makeQuad <$> planeBounds <*> atlasBounds
-  return (b, advance)
+makeGlyph :: AtlasMeta -> Glyph -> ([GlyphVertex], Advance)
+makeGlyph AtlasMeta{..} Glyph{..} =
+  let quad = fromMaybe [] $ makeQuad <$> planeBounds <*> atlasBounds
+  in (quad, advance)
  where
-  makeQuad :: Bounds -> Bounds -> ContextT ctx os m (Buffer os GlyphGeometry)
-  makeQuad pBounds aBounds = do
+  makeQuad :: Bounds -> Bounds -> [GlyphVertex]
+  makeQuad pBounds aBounds =
     -- x, y - the glyph's quad geometry in ems
     let x0 = left pBounds
         y0 = bottom pBounds
@@ -89,18 +90,17 @@ makeGlyph AtlasMeta{..} Glyph{..} = do
         h = fromIntegral height
 
     -- u, v - the glyph's atlas texture co-ordinates in OpenGL uv space.
-        u0 = right aBounds / w
-        u1 = left aBounds / w
+        u0 = left aBounds / w
+        u1 = right aBounds / w
 
         V2 v0 v1 = case yOrigin of
           YTop    -> V2 (    bottom aBounds) (    top aBounds) ^/ h
           YBottom -> V2 (h - bottom aBounds) (h - top aBounds) ^/ h
 
-        quad = [ (V2 x0 y0, V2 u0 v0),
-                 (V2 x1 y0, V2 u1 v0),
-                 (V2 x1 y1, V2 u1 v1),
-                 (V2 x0 y1, V2 u0 v1)
-               ]
-    b <- newBuffer . length $ quad
-    writeBuffer b 0 quad
-    return b
+    in [ (V2 x0 y0, V2 u0 v0),
+         (V2 x1 y0, V2 u1 v0),
+         (V2 x1 y1, V2 u1 v1),
+         (V2 x1 y1, V2 u1 v1),
+         (V2 x0 y1, V2 u0 v1),
+         (V2 x0 y0, V2 u0 v0)
+       ]
