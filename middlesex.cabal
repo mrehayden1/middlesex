@@ -27,6 +27,7 @@ executable middlesex-exe
   main-is: Main.hs
   other-modules:
       App.Env
+      App.Game
       App.Graphics
       App.Graphics.Env
       App.Graphics.Render
@@ -34,6 +35,7 @@ executable middlesex-exe
       App.Graphics.Text.Font
       App.Graphics.Text.Font.Atlas
       App.Graphics.Texture
+      App.Matrix
       Paths_middlesex
   hs-source-dirs:
       src
@@ -42,10 +44,12 @@ executable middlesex-exe
       DeriveGeneric
       FlexibleContexts
       FlexibleInstances
+      LambdaCase
       MultiParamTypeClasses
       OverloadedStrings
       RecordWildCards
       ScopedTypeVariables
+      TupleSections
       TypeFamilies
       UndecidableInstances
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -threaded -rtsopts -with-rtsopts=-N
@@ -60,6 +64,7 @@ executable middlesex-exe
     , containers
     , dependent-sum
     , exception-transformers
+    , lens
     , linear
     , mtl
     , ref-tf

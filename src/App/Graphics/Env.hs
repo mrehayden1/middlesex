@@ -4,4 +4,4 @@ module App.Graphics.Env (
 
 import Graphics.GPipe
 
-type Window' os = Window os RGBFloat ()
+type Window' os = Window os RGBAFloat ()

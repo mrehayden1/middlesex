@@ -48,13 +48,13 @@ createShader window Font{..} = do
     let median r g b = maxB (minB r g) $ minB (maxB r g) b
 
     let calcShading uv =
-          let V3 r g b = sample2D sampler SampleAuto Nothing Nothing uv
+          let V4 r g b _ = sample2D sampler SampleAuto Nothing Nothing uv
               signedDist = median r g b
               screenPxDist = realToFrac (scale * fontSdfUnitRange) * (signedDist - 0.5)
               opacity = clamp (screenPxDist + 0.5) 0 1
-          in mix 0 1 (pure opacity) :: V3 (S F Float)
+          in mix 0 (V4 0 0 0 1) (pure opacity) :: V4 (S F Float)
 
-    let proj = ortho 0 1920 0 1080 0 1
+    let proj = ortho 0 (realToFrac vw) 0 (realToFrac vh) 0 1
 
     primitiveStream <- toPrimitiveStream id
     let primitiveStream2 = flip fmap primitiveStream $ \(V2 x y, tx) ->
@@ -69,8 +69,16 @@ createShader window Font{..} = do
           )
 
     drawWindowColor
-      (const (window, ContextColorOption NoBlending (V3 True True True)))
+      (const (window, ContextColorOption blending (pure True)))
       fragmentStream
+ where
+  blending =
+    BlendRgbAlpha
+      (FuncAdd, FuncAdd)
+      (BlendingFactors SrcAlpha OneMinusSrcAlpha, BlendingFactors One Zero)
+      0
+
+
 
 renderText :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Font os

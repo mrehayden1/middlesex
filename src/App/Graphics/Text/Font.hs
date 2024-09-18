@@ -40,7 +40,7 @@ debugTypeface   = 1
 -- When loaded a font's textures and vertex buffers are immediately stored on
 -- graphics memory.
 data Font os = Font {
-  fontGlyphTexture :: Texture2D os (Format RGBFloat),
+  fontGlyphTexture :: Texture2D os (Format RGBAFloat),
   fontSize :: Float,
   fontSdfUnitRange :: Float,
   -- Glyph geometry and the advance (the distance to move the cursor to draw

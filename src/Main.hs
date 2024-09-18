@@ -10,31 +10,20 @@ import Data.Dependent.Sum
 import Data.Foldable
 import Data.Maybe
 import Data.IORef
+import Data.Time.Clock
 import Data.Traversable
 import Reflex hiding (mapMaybe)
 import Reflex.Host.Class
 import System.Exit
 
 import App.Env
+import App.Game
 
 name :: String
 name = "Middlesex"
 
 version :: String
 version = "0.1.0"
-
-data Output t = Output {
-    outputQuit :: Event t (),
-    outputScene :: Event t ()
-  }
-
-start :: forall os t m. App os t m => m (Output t)
-start = do
-  Env{..} <- ask
-  return $ Output {
-      outputQuit = void envEKey,
-      outputScene = void envETick
-    }
 
 main :: IO ()
 main = do
@@ -62,7 +51,7 @@ main = do
       . flip runPostBuildT ePostBuild
       . flip runTriggerEventT eventsChan
       . flip runReaderT env
-      $ start
+      $ game
 
     -- Event handles - for reading current `Event` values, which may or may not
     -- have been produced since the last frame.
@@ -74,14 +63,28 @@ main = do
           putStrLn "Exiting..."
           exitSuccess
 
+    -- The game tick which is synchronised with each render.
+    timeRef <- liftIO $ newIORef =<< getCurrentTime
+
+    let doTick = liftIO $ do
+          now' <- getCurrentTime
+          deltaT <- fmap (realToFrac . diffUTCTime now') . readIORef $ timeRef
+          tickTrigger deltaT
+          writeIORef timeRef now'
+
+    let doRender scene = do
+          renderScene scene
+          -- Call the tick trigger after we render so we know how long the last
+          -- frame took and so there's an event in the chan.
+          doTick
+
     -- Processes event outputs. There will be a list of outputs, one for each
     -- event triggered so we have to process them all accordingly.
     let handleOutput outs = do
           -- Any quit event should cause the application to exit.
           mapM_ (const $ liftIO exit) . mapMaybe fst $ outs
           -- Render the latest Picture output.
-          mapM_ (const renderScene) . listToMaybe . mapMaybe snd . reverse
-            $ outs
+          mapM_ doRender . listToMaybe . mapMaybe snd . reverse $ outs
 
     -- Reads output event handles and sequences any actions by PerformEvent
     -- methods.
@@ -108,7 +111,9 @@ main = do
       Just trigger -> lift $ fire [trigger :=> Identity ()] readPhase
     handleOutput out
 
-    liftIO $ tickTrigger () -- =<< getCurrentTime
+    -- Call the tick trigger once so there's an event in the channel and we
+    -- don't block on the first read.
+    doTick
 
     -- Main loop.
     fix $ \loop -> do
@@ -118,10 +123,8 @@ main = do
       outs <- lift . fireEventTriggerRefs events $ readPhase
       handleOutput outs
 
-      -- Call the tick trigger after we render so we know how long the last
-      -- frame took and so there's an event in the chan.
-      liftIO $ tickTrigger () -- =<< getCurrentTime
-
+      -- Exit if the window close button was pressed.
       closeRequested <- windowShouldClose'
       liftIO . when (closeRequested == Just True) $ exit
+
       loop

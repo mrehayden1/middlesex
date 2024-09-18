@@ -5,6 +5,9 @@ module App.Env (
   App,
   Env(..),
 
+  Key(..),
+  KeyState(..),
+
   initialise
 ) where
 
@@ -23,21 +26,23 @@ type App os t m = (MonadIO m, MonadIO (Performable m), MonadFix m,
   PostBuild t m, TriggerEvent t m, MonadReader (Env os t) m)
 
 data Env os t = Env {
-     envEKey :: Event t (),
-     envETick :: Event t ()
+     envEKey :: Event t (Key, KeyState),
+     envETick :: Event t DeltaT
   }
+
+type DeltaT = Float
 
 initialise :: (m ~ SpiderHost Global, t ~ SpiderTimeline Global)
  => String
  -> TriggerEventT t
       (ContextT Handle os m)
-      (Env os t, ContextT Handle os m (), ContextT Handle os m (Maybe Bool), () -> IO ())
+      (Env os t, Scene -> ContextT Handle os m (), ContextT Handle os m (Maybe Bool), DeltaT -> IO ())
 initialise name = do
   (window, renderScene) <- lift . Graphics.initialise $ name
 
   -- Create input events.
   (eKey, keyTrigger) <- newTriggerEvent
-  _ <- lift . setKeyCallback window . Just $ \_ _ _ _ -> keyTrigger ()
+  _ <- lift . setKeyCallback window . Just $ \k _ ks _ -> keyTrigger (k, ks)
 
   -- Create a tick event so the host can trigger a tick after each frame
   -- render.
@@ -45,8 +50,8 @@ initialise name = do
 
   let env = Env eKey eTick
 
-  let renderScene' = do
-        renderScene
+  let renderScene' scene = do
+        renderScene scene
         -- Swap buffers. Also polls the window for events which will collect
         -- any `TriggerEvent` events dispatched by GLFW callbacks.
         swapWindowBuffers window

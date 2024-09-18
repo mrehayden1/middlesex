@@ -30,6 +30,7 @@ dependencies:
 - containers
 - dependent-sum
 - exception-transformers
+- lens
 - linear
 - mtl
 - reflex
@@ -53,10 +54,12 @@ default-extensions:
 - DeriveGeneric
 - FlexibleContexts
 - FlexibleInstances
+- LambdaCase
 - MultiParamTypeClasses
 - OverloadedStrings
 - RecordWildCards
 - ScopedTypeVariables
+- TupleSections
 - TypeFamilies
 - UndecidableInstances
 
