@@ -26,8 +26,10 @@ type App os t m = (MonadIO m, MonadIO (Performable m), MonadFix m,
   PostBuild t m, TriggerEvent t m, MonadReader (Env os t) m)
 
 data Env os t = Env {
-     envEKey :: Event t (Key, KeyState),
-     envETick :: Event t DeltaT
+     eCursorPos :: Event t (Int, Int),
+     eKey :: Event t (Key, KeyState),
+     eTick :: Event t DeltaT,
+     windowSize :: (Int, Int)
   }
 
 type DeltaT = Float
@@ -36,19 +38,26 @@ initialise :: (m ~ SpiderHost Global, t ~ SpiderTimeline Global)
  => String
  -> TriggerEventT t
       (ContextT Handle os m)
-      (Env os t, Scene -> ContextT Handle os m (), ContextT Handle os m (Maybe Bool), DeltaT -> IO ())
+      (Env os t,
+       Scene -> ContextT Handle os m (),
+       ContextT Handle os m (Maybe Bool),
+       DeltaT -> IO ())
 initialise name = do
-  (window, renderScene) <- lift . Graphics.initialise $ name
+  (window, renderScene, windowSize) <- lift . Graphics.initialise $ name
 
   -- Create input events.
   (eKey, keyTrigger) <- newTriggerEvent
   _ <- lift . setKeyCallback window . Just $ \k _ ks _ -> keyTrigger (k, ks)
 
+  (eCursorPos, cursorPosTrigger) <- newTriggerEvent
+  _ <- lift . setCursorPosCallback window . Just $
+         \x y -> cursorPosTrigger (round x, round y)
+
   -- Create a tick event so the host can trigger a tick after each frame
   -- render.
   (eTick, tickTrigger) <- newTriggerEvent
 
-  let env = Env eKey eTick
+  let env = Env eCursorPos eKey eTick windowSize
 
   let renderScene' scene = do
         renderScene scene

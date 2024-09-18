@@ -1,4 +1,6 @@
 module App.Graphics (
+  module Linear,
+
   Scene,
 
   initialise,
@@ -15,7 +17,9 @@ module App.Graphics (
 
   setKeyCallback,
   Key(..),
-  KeyState(..)
+  KeyState(..),
+
+  setCursorPosCallback
 ) where
 
 import Control.Applicative
@@ -26,7 +30,8 @@ import Data.Maybe
 import Graphics.GPipe hiding (Render, Shader, render)
 import qualified Graphics.GPipe as GPipe
 import Graphics.GPipe.Context.GLFW
-import Graphics.UI.GLFW as GLFW hiding (setKeyCallback, windowShouldClose)
+import qualified Graphics.UI.GLFW as GLFW
+import Linear
 
 import App.Graphics.Env
 import qualified App.Graphics.Text as Text
@@ -107,22 +112,26 @@ createShader window = do
 
 initialise :: (ctx ~ Handle, MonadIO m, MonadException m)
   => String
-  -> ContextT ctx os m (Window' os, Scene -> Renderer ctx os m)
+  -> ContextT ctx os m (Window' os, Scene -> Renderer ctx os m, (Int, Int))
 initialise name = do
   monitor <- liftIO GLFW.getPrimaryMonitor
   videoMode <- liftIO . fmap join . mapM GLFW.getVideoMode $ monitor
+
+  let windowHeight = fromMaybe windowHeightFallback $
+                       windowHeightOverride
+                         <|> fmap GLFW.videoModeHeight videoMode
+      windowWidth = fromMaybe windowWidthFallback $
+                      windowWidthOverride
+                        <|> fmap GLFW.videoModeWidth videoMode
+
   let windowConfig = WindowConfig {
-          configHeight = fromMaybe windowHeightDefault $
-                           windowHeightOverride
-                             <|> fmap videoModeHeight videoMode,
+          configHeight = windowHeight,
           configHints = [],
           -- Setting a monitor runs the app in fullscreen.
           configMonitor = if fullscreen then monitor else Nothing,
           configSwapInterval = Just 0,
           configTitle = name,
-          configWidth = fromMaybe windowWidthDefault $
-                          windowWidthOverride
-                            <|> fmap videoModeWidth videoMode
+          configWidth = windowWidth
         }
 
   window <- newWindow (WindowFormatColor RGBA8) windowConfig
@@ -139,7 +148,7 @@ initialise name = do
         renderGrid shader tileTexture scene
         --renderText 0 1 (V2 960 540) "Hello, World!"
 
-  return (window, render)
+  return (window, render, (windowWidth, windowHeight))
 
 renderGrid :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Shader os
