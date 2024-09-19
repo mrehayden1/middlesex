@@ -50,6 +50,7 @@ executable middlesex-exe
       RecordWildCards
       ScopedTypeVariables
       TupleSections
+      TypeApplications
       TypeFamilies
       UndecidableInstances
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -threaded -rtsopts -with-rtsopts=-N

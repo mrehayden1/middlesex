@@ -60,6 +60,7 @@ default-extensions:
 - RecordWildCards
 - ScopedTypeVariables
 - TupleSections
+- TypeApplications
 - TypeFamilies
 - UndecidableInstances
 

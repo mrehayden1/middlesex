@@ -45,10 +45,10 @@ game = do
       left  = (||) <$> keyLeft  <*> cursorLeft
       right = (||) <$> keyRight <*> cursorRight
 
-      velUp    = bool 0 (-1) <$> up
-      velDown  = bool 0   1  <$> down
-      velLeft  = bool 0 (-1) <$> left
-      velRight = bool 0   1  <$> right
+      velUp    = bool 0 (-speed) <$> up
+      velDown  = bool 0   speed  <$> down
+      velLeft  = bool 0 (-speed) <$> left
+      velRight = bool 0   speed  <$> right
 
       velX = (+) <$> velLeft <*> velRight
       velY = (+) <$> velUp <*> velDown
@@ -62,3 +62,7 @@ game = do
       outputQuit = void . ffilter ((== Key'Escape) . fst) $ eKey,
       outputScene = updated pos
     }
+ where
+  -- in tile widths
+  speed :: Float
+  speed = 2.5
