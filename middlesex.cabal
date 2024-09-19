@@ -29,7 +29,9 @@ executable middlesex-exe
       App.Env
       App.Game
       App.Graphics
+      App.Graphics.Camera
       App.Graphics.Env
+      App.Graphics.Projection
       App.Graphics.Render
       App.Graphics.Text
       App.Graphics.Text.Font

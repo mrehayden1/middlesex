@@ -28,6 +28,7 @@ type App os t m = (MonadIO m, MonadIO (Performable m), MonadFix m,
 data Env os t = Env {
      eCursorPos :: Event t (Int, Int),
      eKey :: Event t (Key, KeyState),
+     eMouseButton :: Event t (MouseButton, MouseButtonState),
      eTick :: Event t DeltaT,
      windowSize :: (Int, Int)
   }
@@ -53,11 +54,15 @@ initialise name = do
   _ <- lift . setCursorPosCallback window . Just $
          \x y -> cursorPosTrigger (round x, round y)
 
+  (eMouseButton, mouseButtonTrigger) <- newTriggerEvent
+  _ <- lift . setMouseButtonCallback window . Just $
+         \b s _ -> mouseButtonTrigger (b, s)
+
   -- Create a tick event so the host can trigger a tick after each frame
   -- render.
   (eTick, tickTrigger) <- newTriggerEvent
 
-  let env = Env eCursorPos eKey eTick windowSize
+  let env = Env eCursorPos eKey eMouseButton eTick windowSize
 
   let renderScene' scene = do
         renderScene scene

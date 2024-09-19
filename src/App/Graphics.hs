@@ -18,8 +18,13 @@ module App.Graphics (
   setKeyCallback,
   Key(..),
   KeyState(..),
+  ModifierKeys(..),
 
-  setCursorPosCallback
+  setCursorPosCallback,
+
+  setMouseButtonCallback,
+  MouseButton(..),
+  MouseButtonState(..)
 ) where
 
 import Control.Applicative
@@ -34,12 +39,14 @@ import Graphics.GPipe.Context.GLFW
 import qualified Graphics.UI.GLFW as GLFW
 import Linear
 
+import App.Graphics.Camera
 import App.Graphics.Env
 import qualified App.Graphics.Text as Text
+import App.Graphics.Projection
 import App.Graphics.Texture
 import App.Matrix
 
-type Scene = V2 Float
+type Scene = Camera Float
 
 data ShaderEnv os = ShaderEnv {
     shaderEnvBaseColour :: Buffer os (Uniform (B4 Float)),
@@ -60,13 +67,14 @@ mapTexturePath :: FilePath
 mapTexturePath = "assets/textures/map.png"
 
 fullscreen :: Bool
+--fullscreen = true
 fullscreen = false
 
 -- When no window size can be determined, either from the override or the
 -- primary monitor's current video mode, we default to these values.
-windowHeightDefault, windowWidthDefault :: Int
-windowHeightDefault = 1080
-windowWidthDefault = 1920
+windowHeightFallback, windowWidthFallback :: Int
+windowHeightFallback = 1080
+windowWidthFallback = 1920
 
 windowHeightOverride, windowWidthOverride :: Maybe Int
 windowHeightOverride = Just 1080
@@ -79,8 +87,6 @@ createShader :: (ContextHandler ctx, MonadIO m, MonadException m)
   -> ContextT ctx os m (Shader os)
 createShader window = do
   V2 vw vh <- getFrameBufferSize window
-  let vw' = realToFrac vw
-      vh' = realToFrac vh
 
   compileShader $ do
     -- Textures
@@ -92,15 +98,14 @@ createShader window = do
     modelM <- getUniform (\s -> (shaderEnvModelM s, 0))
     viewM <- getUniform (\s -> (shaderEnvViewM s, 0))
 
-    let fov = 20 -- degrees
-        projM = perspective (fov * pi / 180) (vw'/vh') 0.001 10000
     -- Base colour
     baseColour <- getUniform (\s -> (shaderEnvBaseColour s, 0))
 
     -- Vertex shader
     primitiveStream <- toPrimitiveStream shaderEnvGeometry
     let primitiveStream' = flip fmap primitiveStream $
-          \(V2 x y, uv) -> (projM !*! viewM !*! modelM !* V4 x y 0 1, uv)
+          \(V3 x y z, uv) ->
+             (projection vw vh !*! viewM !*! modelM !* V4 x y z 1, uv)
 
     -- Fragment shader
     let shadeFragment =
@@ -156,7 +161,7 @@ initialise name = do
   -- Tile data
   tileTexture <- fromPng tileFilePath
 
-  let hexGridWidth = 30
+  let hexGridWidth  = 30
       hexGridHeight = 21
 
       tileVertices = fmap (first (\(V2 x y) -> V3 x y 0))
@@ -184,17 +189,12 @@ initialise name = do
 
       mapModel = Model mapMaterial mapModelMatrix mapVertices
 
-  let renderScene (V2 camX camZ) = do
+  let renderScene camera = do
         -- Clear the colour buffer
         GPipe.render $ clearWindowColor window 0
 
         -- Camera view matrix
-        let camera = Camera {
-                camPitch = -(3 * pi) / 8,
-                camPos   = V3 camX 0 camZ + V3 0 25 10,
-                camYaw   = pi / 2
-              }
-            viewM = toViewMatrix camera
+        let viewM = toViewMatrix camera
 
         -- Render the scene
         render shader viewM mapModel
@@ -264,10 +264,18 @@ makeTileVertices nx ny size =
  where
   offset (V2 x y) = V2 (xOffset x y) (yOffset y)
 
-  xOffset x y | even y    = (fromIntegral (x - nx `div` 2) + 0.5) * sqrt 3 * size
-              | otherwise = (fromIntegral (x - nx `div` 2) + 1  ) * sqrt 3 * size
+  xOffset x y | even y    = (x' - ((nx' - 1) / 2))       * w
+              | otherwise = (x' - ((nx' - 1) / 2) + 0.5) * w
+   where
+    w   = sqrt 3 * size
+    x'  = fromIntegral x
+    nx' = fromIntegral nx
 
-  yOffset y = fromIntegral (y - ny `div` 2) * 3 * size / 2
+  yOffset y = (y' - ((ny' - 1) / 2)) * h
+   where
+    h   = 3 * size / 2
+    y'  = fromIntegral y
+    ny' = fromIntegral ny
 
 -- Creates a list of hex-grid offset coordinates for the given width and height.
 -- See https://www.redblobgames.com/grids/hexagons/ for more.
