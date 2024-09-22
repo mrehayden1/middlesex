@@ -57,7 +57,7 @@ makeModels board = do
 
   let instances = tileInstances board
 
-      baseColour = V4 0 0 0 1
+      baseColour = V4 0.08 0.02 0.02 1
 
       makeModel path = do
         texture <- fromPng path
