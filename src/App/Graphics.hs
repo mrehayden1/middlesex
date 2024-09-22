@@ -1,4 +1,6 @@
 module App.Graphics (
+  module App.Graphics.Camera,
+  module App.Graphics.Projection,
   module Linear,
 
   Scene,
@@ -28,63 +30,50 @@ module App.Graphics (
 ) where
 
 import Control.Applicative
-import Control.Arrow
 import Control.Monad
 import Control.Monad.Exception
 import Control.Monad.IO.Class
 import Data.Maybe
-import Graphics.GPipe hiding (Render, Shader, render)
+import Graphics.GPipe
 import qualified Graphics.GPipe as GPipe
 import Graphics.GPipe.Context.GLFW
 import qualified Graphics.UI.GLFW as GLFW
 import Linear
 
+import App.Graphics.Board
 import App.Graphics.Camera
 import App.Graphics.Env
 import qualified App.Graphics.Text as Text
 import App.Graphics.Projection
-import App.Graphics.Texture
-import App.Matrix
 
 type Scene = Camera Float
 
-data ShaderEnv os = ShaderEnv {
-    shaderEnvBaseColour :: Buffer os (Uniform (B4 Float)),
-    shaderEnvAlbedoTexture :: Texture2D os (Format RGBAFloat),
-    shaderEnvModelM :: Buffer os (Uniform (V4 (B4 Float))),
-    shaderEnvViewM :: Buffer os (Uniform (V4 (B4 Float))),
-    shaderEnvGeometry :: PrimitiveArray Triangles (B3 Float, B2 Float)
-  }
-
-type Shader os = CompiledShader os (ShaderEnv os)
-
-type Renderer ctx os m = ContextT ctx os m ()
-
-tileFilePath :: FilePath
-tileFilePath = "assets/textures/hextiles/grass1.png"
-
-mapTexturePath :: FilePath
-mapTexturePath = "assets/textures/map.png"
+maxInstances :: Int
+maxInstances = 1024
 
 fullscreen :: Bool
 --fullscreen = true
 fullscreen = false
 
--- When no window size can be determined, either from the override or the
+windowHeight, windowWidth :: Maybe Int
+--windowHeight = Just 1080
+--windowWidth = Just 1920
+
+windowHeight = Just 1440
+windowWidth = Just 2560
+
+--windowHeight = Nothing
+--windowWidth = Nothing
+
+-- When no window size can be determined, either from the setting above or the
 -- primary monitor's current video mode, we default to these values.
 windowHeightFallback, windowWidthFallback :: Int
 windowHeightFallback = 1080
 windowWidthFallback = 1920
 
-windowHeightOverride, windowWidthOverride :: Maybe Int
-windowHeightOverride = Just 1080
-windowWidthOverride = Just 1920
---windowHeightOverride = Nothing
---windowWidthOverride = Nothing
-
 createShader :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Window' os
-  -> ContextT ctx os m (Shader os)
+  -> ContextT ctx os m (Shader' os)
 createShader window = do
   V2 vw vh <- getFrameBufferSize window
 
@@ -95,16 +84,15 @@ createShader window = do
       (shaderEnvAlbedoTexture s, sampleFilter, (pure Repeat, undefined))
 
     -- Matrices
-    modelM <- getUniform (\s -> (shaderEnvModelM s, 0))
-    viewM <- getUniform (\s -> (shaderEnvViewM s, 0))
+    viewM <- getUniform (\s -> (shaderEnvViewMatrix s, 0))
 
     -- Base colour
     baseColour <- getUniform (\s -> (shaderEnvBaseColour s, 0))
 
     -- Vertex shader
-    primitiveStream <- toPrimitiveStream shaderEnvGeometry
+    primitiveStream <- toPrimitiveStream shaderEnvPrimitives
     let primitiveStream' = flip fmap primitiveStream $
-          \(V3 x y z, uv) ->
+          \((V3 x y z, uv), modelM) ->
              (projection vw vh !*! viewM !*! modelM !* V4 x y z 1, uv)
 
     -- Fragment shader
@@ -130,26 +118,27 @@ createShader window = do
 
 initialise :: (ctx ~ Handle, MonadIO m, MonadException m)
   => String
-  -> ContextT ctx os m (Window' os, Scene -> Renderer ctx os m, (Int, Int))
+  -> ContextT ctx os m (
+         Window' os,
+         Scene -> ContextT ctx os m (), (Int, Int)
+       )
 initialise name = do
   monitor <- liftIO GLFW.getPrimaryMonitor
   videoMode <- liftIO . fmap join . mapM GLFW.getVideoMode $ monitor
 
-  let windowHeight = fromMaybe windowHeightFallback $
-                       windowHeightOverride
-                         <|> fmap GLFW.videoModeHeight videoMode
-      windowWidth = fromMaybe windowWidthFallback $
-                      windowWidthOverride
-                        <|> fmap GLFW.videoModeWidth videoMode
+  let windowHeight' = fromMaybe windowHeightFallback $
+                        windowHeight <|> fmap GLFW.videoModeHeight videoMode
+      windowWidth'  = fromMaybe windowWidthFallback $
+                        windowWidth <|> fmap GLFW.videoModeWidth videoMode
 
   let windowConfig = WindowConfig {
-          configHeight = windowHeight,
+          configHeight = windowHeight',
           configHints = [],
           -- Setting a monitor runs the app in fullscreen.
           configMonitor = if fullscreen then monitor else Nothing,
           configSwapInterval = Just 0,
           configTitle = name,
-          configWidth = windowWidth
+          configWidth = windowWidth'
         }
 
   window <- newWindow (WindowFormatColor RGBA8) windowConfig
@@ -158,36 +147,9 @@ initialise name = do
 
   renderText <- Text.initialise window
 
-  -- Tile data
-  tileTexture <- fromPng tileFilePath
+  (mapModel, tileInstances) <- makeModels
 
-  let hexGridWidth  = 30
-      hexGridHeight = 21
-
-      tileVertices = fmap (first (\(V2 x y) -> V3 x y 0))
-        . makeTileVertices hexGridWidth hexGridHeight
-        $ 1
-
-      tileBaseColour = V4 0 0 0 1
-      tileMaterial = Material tileBaseColour tileTexture
-
-      tileModelMatrix = rotateX (-pi / 2)
-
-      tilesModel = Model tileMaterial tileModelMatrix tileVertices
-
-  -- Map data
-  mapTexture <- fromPng mapTexturePath
-
-  let mapVertices = fmap (first (\(V2 x y) -> V3 x y 0))
-        . makeMapVertices hexGridWidth hexGridHeight 1
-        $ 1
-
-      mapBaseColour = V4 1 1 1 1
-      mapMaterial = Material mapBaseColour mapTexture
-
-      mapModelMatrix = rotateX (-pi / 2)
-
-      mapModel = Model mapMaterial mapModelMatrix mapVertices
+  instanceBuffer :: Buffer os (V4 (B4 Float)) <- newBuffer maxInstances
 
   let renderScene camera = do
         -- Clear the colour buffer
@@ -197,151 +159,14 @@ initialise name = do
         let viewM = toViewMatrix camera
 
         -- Render the scene
-        render shader viewM mapModel
-        render shader viewM tilesModel
+        runRenderer shader $ do
+          -- Render the map background
+          liftContextT . writeBuffer instanceBuffer 0 $ [identity]
+          runShader mapModel viewM instanceBuffer 1
+          -- Render the map tiles
+          forM_ tileInstances $ \(model, instances) -> do
+            liftContextT . writeBuffer instanceBuffer 0 $ instances
+            runShader model viewM instanceBuffer . length $ instances
         --renderText 0 1 (V2 960 540) "Hello, World!"
 
-  return (window, renderScene, (windowWidth, windowHeight))
-
-data Model os = Model {
-    modelMaterial :: Material os,
-    modelMatrix :: ModelM,
-    modelVertices :: [(V3 Float, V2 Float)]
-  }
-
-data Material os = Material {
-    materialBaseColour :: V4 Float,
-    materialAlbedoTexture :: Texture2D os (Format RGBAFloat)
-  }
-
-type ViewM = M44 Float
-
-type ModelM = M44 Float
-
-render :: (ContextHandler ctx, MonadIO m, MonadException m)
-  => Shader os
-  -> ViewM
-  -> Model os
-  -> Renderer ctx os m
-render shader viewM Model{..} = do
-  let Material{..} = modelMaterial
-
-  -- Vertex buffer
-  vertexBuffer <- newBuffer . length $ modelVertices
-  writeBuffer vertexBuffer 0 modelVertices
-
-  -- Uniforms
-  --   Model matrix
-  modelMBuffer :: Buffer os (Uniform (V4 (B4 Float))) <- newBuffer 1
-  writeBuffer modelMBuffer 0 [modelMatrix]
-
-  --   View matrix
-  viewMBuffer :: Buffer os (Uniform (V4 (B4 Float))) <- newBuffer 1
-  writeBuffer viewMBuffer 0 [viewM]
-
-  --   Base colour
-  baseColour :: Buffer os (Uniform (B4 Float)) <- newBuffer 1
-  writeBuffer baseColour 0 [materialBaseColour]
-
-  GPipe.render $ do
-    vertexArray <- newVertexArray vertexBuffer
-    let primitiveArray = toPrimitiveArray TriangleList vertexArray
-
-    shader $ ShaderEnv {
-        shaderEnvBaseColour = baseColour,
-        shaderEnvAlbedoTexture = materialAlbedoTexture,
-        shaderEnvModelM = modelMBuffer,
-        shaderEnvViewM = viewMBuffer,
-        shaderEnvGeometry = primitiveArray
-      }
-
--- Make the geometry of an nx by ny pointy-top oriented hextile board where the
--- origin is in the middle of the board and the even rows are offset by one.
-makeTileVertices :: Int -> Int -> Float -> [(V2 Float, V2 Float)]
-makeTileVertices nx ny size =
-  let coords = makeGridCoords nx ny
-  in concatMap (hexTileVertices size . offset) coords
- where
-  offset (V2 x y) = V2 (xOffset x y) (yOffset y)
-
-  xOffset x y | even y    = (x' - ((nx' - 1) / 2))       * w
-              | otherwise = (x' - ((nx' - 1) / 2) + 0.5) * w
-   where
-    w   = sqrt 3 * size
-    x'  = fromIntegral x
-    nx' = fromIntegral nx
-
-  yOffset y = (y' - ((ny' - 1) / 2)) * h
-   where
-    h   = 3 * size / 2
-    y'  = fromIntegral y
-    ny' = fromIntegral ny
-
--- Creates a list of hex-grid offset coordinates for the given width and height.
--- See https://www.redblobgames.com/grids/hexagons/ for more.
-makeGridCoords :: Int -> Int -> [V2 Int]
-makeGridCoords w h = do
-  y <- [0..(h - 1)]
-  x <- [0..(w - 1)]
-  guard $ even y || x /= w - 1
-  return $ V2 x y
-
--- Create vertices (positions and UVs) of the regular hexagon where size is
--- the shortest distance from the centre to any point.
-hexTileVertices :: Float -> V2 Float -> [(V2 Float, V2 Float)]
-hexTileVertices size orig =
-  [c, ne, n ,
-   c, n , nw,
-   c, nw, sw,
-   c, sw, s ,
-   c, s , se,
-   c, se, ne
-  ]
- where
-  --        position               u    v
-  -- Hexagon centre
-  c  = (orig, V2 0.5  0.5 )
-  -- The corners of the hexagon
-  ne = (hexNorthEast size orig, V2 1    0.25)
-  n  = (hexNorth     size orig, V2 0.5  0   )
-  nw = (hexNorthWest size orig, V2 0    0.25)
-  se = (hexSouthEast size orig, V2 1    0.75)
-  s  = (hexSouth     size orig, V2 0.5  1   )
-  sw = (hexSouthWest size orig, V2 0    0.75)
-
-hexNorthEast :: Float -> V2 Float -> V2 Float
-hexNorthEast size (V2 origX origY) = V2 (origX + w / 2) (origY + size / 2)
- where
-  w = size * sqrt 3
-
-hexNorth :: Float -> V2 Float -> V2 Float
-hexNorth size (V2 origX origY) = V2 origX (origY + size)
-
-hexNorthWest :: Float -> V2 Float -> V2 Float
-hexNorthWest size (V2 origX origY) = V2 (origX - w / 2) (origY + size / 2)
- where
-  w = size * sqrt 3
-
-hexSouthEast :: Float -> V2 Float -> V2 Float
-hexSouthEast size (V2 origX origY) = V2 (origX + w / 2) (origY - size / 2)
- where
-  w = size * sqrt 3
-
-hexSouth :: Float -> V2 Float -> V2 Float
-hexSouth size (V2 origX origY) = V2 origX (origY - size)
-
-hexSouthWest :: Float -> V2 Float -> V2 Float
-hexSouthWest size (V2 origX origY) = V2 (origX - w / 2) (origY - size / 2)
- where
-  w = size * sqrt 3
-
--- Make the geometry of a background for an nx by ny hextile board.
-makeMapVertices :: Int -> Int -> Float -> Float -> [(V2 Float, V2 Float)]
-makeMapVertices nx ny size padding =
-  let sw = (V2 ((-w / 2) - padding) ((-h / 2) - padding), V2 0 1)
-      se = (V2 (( w / 2) + padding) ((-h / 2) - padding), V2 1 1)
-      ne = (V2 (( w / 2) + padding) (( h / 2) + padding), V2 1 0)
-      nw = (V2 ((-w / 2) - padding) (( h / 2) + padding), V2 0 0)
-      w  = size * sqrt 3 * fromIntegral nx
-      h  = (3 * fromIntegral ny * size) / 2 + (size / 2)
-  in [sw, se, nw, se, ne, nw]
+  return (window, renderScene, (windowWidth', windowHeight'))

@@ -15,7 +15,7 @@ import Data.Vector ((!))
 import Linear
 import Graphics.GPipe hiding (Shader)
 
-import App.Graphics.Env
+import App.Graphics.Env hiding (Renderer)
 import App.Graphics.Text.Font as F
 
 type Origin = V2 Float

@@ -1,8 +1,11 @@
 module App.Matrix (
   eulerDirection,
+
   rotateX,
   rotateY,
-  rotateZ
+  rotateZ,
+
+  translate
 ) where
 
 import Linear
@@ -34,3 +37,10 @@ rotateZ t =
      (V4 (sin t) ( cos t) 0 0)
      (V4       0        0 1 0)
      (V4       0        0 0 1)
+
+translate :: Num a => V3 a -> M44 a
+translate (V3 x y z) =
+  V4 (V4 1 0 0 x)
+     (V4 0 1 0 y)
+     (V4 0 0 1 z)
+     (V4 0 0 0 1)

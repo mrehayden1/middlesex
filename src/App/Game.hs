@@ -10,8 +10,6 @@ import Linear
 import Reflex
 
 import App.Env
-import App.Graphics.Camera
-import App.Graphics.Projection
 
 data Output t = Output {
     outputQuit :: Event t (),
@@ -66,7 +64,7 @@ game = do
 
   cursorPos <- holdDyn (0, 0) eCursorPos
 
-  let mapClickPos = fmap (uncurry (uncurry mapPosition windowSize))
+  let mapClickPos = fmap (uncurry (uncurry screenMapCoords windowSize))
         . tag ((,) <$> current camera <*> current cursorPos)
         . flip ffilter eMouseButton
         $ \(b, s) -> b == MouseButton'1 && s == MouseButtonState'Pressed
@@ -88,9 +86,9 @@ keyHeld k =
   f key state = key == k &&
                   (state == KeyState'Pressed || state == KeyState'Released)
 
--- Screen position coordinates as co-ordinates on the plane y = 0
-mapPosition :: Int -> Int -> Camera Float -> (Int, Int) -> V2 Float
-mapPosition viewportWidth viewportHeight cam (cursorX, cursorY) =
+-- Screen coordinates as co-ordinates on the plane y = 0
+screenMapCoords :: Int -> Int -> Camera Float -> (Int, Int) -> V2 Float
+screenMapCoords viewportWidth viewportHeight cam (cursorX, cursorY) =
   let projM' = inverseProjection viewportWidth viewportHeight
       viewM' = inv44 . toViewMatrix $ cam
       xNdc =   toNdc (realToFrac viewportWidth)  . realToFrac $ cursorX

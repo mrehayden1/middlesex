@@ -28,7 +28,10 @@ executable middlesex-exe
   other-modules:
       App.Env
       App.Game
+      App.Game.Board
       App.Graphics
+      App.Graphics.Board
+      App.Graphics.Board.Tile
       App.Graphics.Camera
       App.Graphics.Env
       App.Graphics.Projection
@@ -46,6 +49,7 @@ executable middlesex-exe
       DeriveGeneric
       FlexibleContexts
       FlexibleInstances
+      GeneralizedNewtypeDeriving
       LambdaCase
       MultiParamTypeClasses
       OverloadedStrings
@@ -61,12 +65,14 @@ executable middlesex-exe
     , GPipe
     , GPipe-GLFW
     , JuicyPixels
+    , MonadRandom
     , aeson
     , base >=4.7 && <5
     , bytestring
     , containers
     , dependent-sum
     , exception-transformers
+    , hsnoise
     , lens
     , linear
     , mtl

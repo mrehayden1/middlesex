@@ -15,12 +15,13 @@ import Data.Traversable
 import Reflex hiding (mapMaybe)
 import Reflex.Host.Class
 import System.Exit
+import System.Mem
 
 import App.Env
 import App.Game
 
 name :: String
-name = "Middlesex"
+name = "Acts of Enclosure"
 
 version :: String
 version = "0.1.0"
@@ -126,5 +127,9 @@ main = do
       -- Exit if the window close button was pressed.
       closeRequested <- windowShouldClose'
       liftIO . when (closeRequested == Just True) $ exit
+
+      -- Run the garbage collector every frame in an attempt to keep the major
+      -- GC latency low.
+      liftIO performMinorGC
 
       loop

@@ -5,12 +5,26 @@
 
 packages:
 - completed:
+    hackage: commutative-semigroups-0.1.0.2@sha256:3629c249ac5be72e48eac677969f0638e48b9199370b64ffcf6ceeac391ecc6e,1106
+    pantry-tree:
+      sha256: f817a541d8116bb764fe0240afa3071f6a015b0b3f4ab50482ca75b7a59683a2
+      size: 416
+  original:
+    hackage: commutative-semigroups-0.1.0.2
+- completed:
     hackage: constraints-0.13.4@sha256:5bb8a5db1a5b49eb6904f9fd6ef5f73e41f81dddf5c6a4db14f4172bab15b5f9,2507
     pantry-tree:
       sha256: 52f3559f94415a9933753e8fff24cc1a22b738002fa4260a8acc0f39d353b481
       size: 867
   original:
     hackage: constraints-0.13.4
+- completed:
+    hackage: hsnoise-0.0.3@sha256:260b39175b8a3e3b1719ad3987b7d72a3fd7a0fa99be8639b91cf4dc3f1c8796,1476
+    pantry-tree:
+      sha256: b36873bd7f0076ad70b4750ec04df33461644fc170c02ccf48963a6054f74069
+      size: 536
+  original:
+    hackage: hsnoise-0.0.3
 - completed:
     hackage: patch-0.0.8.2@sha256:629479fb09e451570d4f7b2f581c37b16cb5ff131881f632138a199d8dcfe794,3338
     pantry-tree:
@@ -25,13 +39,6 @@ packages:
       size: 1655
   original:
     hackage: primitive-0.7.4.0
-- completed:
-    hackage: commutative-semigroups-0.1.0.2@sha256:3629c249ac5be72e48eac677969f0638e48b9199370b64ffcf6ceeac391ecc6e,1106
-    pantry-tree:
-      sha256: f817a541d8116bb764fe0240afa3071f6a015b0b3f4ab50482ca75b7a59683a2
-      size: 416
-  original:
-    hackage: commutative-semigroups-0.1.0.2
 - completed:
     hackage: reflex-0.9.3.0@sha256:e0c67fbdd4e270a1a04e3fb7bab03ac431052e9a28296bd55659204a27fa44cb,12252
     pantry-tree:

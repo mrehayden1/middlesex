@@ -40,10 +40,11 @@ packages:
 #   commit: e7b331f14bcffb8367cd58fbfc8b40ec7642100a
 #
 extra-deps:
+- commutative-semigroups-0.1.0.2
 - constraints-0.13.4
+- hsnoise-0.0.3
 - patch-0.0.8.2
 - primitive-0.7.4.0
-- commutative-semigroups-0.1.0.2
 - reflex-0.9.3.0
 - git: https://github.com/tobbebex/GPipe-Core.git
   commit: 4f512f1ea6e6c32bbefaae1be38a68508337b1fa
