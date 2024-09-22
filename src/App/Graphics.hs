@@ -65,6 +65,8 @@ windowWidth = Just 2560
 --windowHeight = Nothing
 --windowWidth = Nothing
 
+type WindowSize = (Int, Int)
+
 -- When no window size can be determined, either from the setting above or the
 -- primary monitor's current video mode, we default to these values.
 windowHeightFallback, windowWidthFallback :: Int
@@ -73,10 +75,9 @@ windowWidthFallback = 1920
 
 createShader :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Window' os
+  -> WindowSize
   -> ContextT ctx os m (Shader' os)
-createShader window = do
-  V2 vw vh <- getFrameBufferSize window
-
+createShader window (vw, vh) = do
   compileShader $ do
     -- Textures
     let sampleFilter = SamplerFilter Linear Linear Linear (Just 3)
@@ -120,7 +121,8 @@ initialise :: (ctx ~ Handle, MonadIO m, MonadException m)
   => String
   -> ContextT ctx os m (
          Window' os,
-         Scene -> ContextT ctx os m (), (Int, Int)
+         Scene -> ContextT ctx os m (),
+         WindowSize
        )
 initialise name = do
   monitor <- liftIO GLFW.getPrimaryMonitor
@@ -130,6 +132,8 @@ initialise name = do
                         windowHeight <|> fmap GLFW.videoModeHeight videoMode
       windowWidth'  = fromMaybe windowWidthFallback $
                         windowWidth <|> fmap GLFW.videoModeWidth videoMode
+
+      windowSize    = (windowWidth', windowHeight')
 
   let windowConfig = WindowConfig {
           configHeight = windowHeight',
@@ -143,7 +147,7 @@ initialise name = do
 
   window <- newWindow (WindowFormatColor RGBA8) windowConfig
 
-  shader <- createShader window
+  shader <- createShader window windowSize
 
   renderText <- Text.initialise window
 
@@ -169,4 +173,4 @@ initialise name = do
             runShader model viewM instanceBuffer . length $ instances
         --renderText 0 1 (V2 960 540) "Hello, World!"
 
-  return (window, renderScene, (windowWidth', windowHeight'))
+  return (window, renderScene, windowSize)
