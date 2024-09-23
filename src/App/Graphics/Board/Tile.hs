@@ -18,6 +18,7 @@ textureDirectory = "assets/textures/hextiles/"
 
 textureFilePaths :: [(Tile, FilePath)]
 textureFilePaths = [
+    -- Land
     (Deadland1      , textureDirectory ++ "deadland-1.png"),
     (Deadland2      , textureDirectory ++ "deadland-2.png"),
     (Fields1        , textureDirectory ++ "fields-1.png"),
@@ -29,14 +30,14 @@ textureFilePaths = [
     (Grass1         , textureDirectory ++ "grass-1.png"),
     (Grass2         , textureDirectory ++ "grass-2.png"),
     (GrassWindmills , textureDirectory ++ "grass-windmills.png"),
-    (Hills1         , textureDirectory ++ "hills-1.png"),
-    (Hills2         , textureDirectory ++ "hills-2.png"),
+    (Hills          , textureDirectory ++ "hills-1.png"),
+    (HillsHigh      , textureDirectory ++ "hills-2.png"),
     (HillsLow1      , textureDirectory ++ "hills-low-1.png"),
     (HillsLow2      , textureDirectory ++ "hills-low-2.png"),
     (HillsLowForest , textureDirectory ++ "hills-low-forest.png"),
-    (Mountain1      , textureDirectory ++ "mountain-1.png"),
-    (Mountain2      , textureDirectory ++ "mountain-2.png"),
+    (Mountain       , textureDirectory ++ "mountain.png"),
     (Tor            , textureDirectory ++ "tor.png"),
+    (TorLow         , textureDirectory ++ "tor-low.png"),
     -- Settlements
     (City           , textureDirectory ++ "settlement-city.png"),
     (CityMountain   , textureDirectory ++ "settlement-city-mountain.png"),
@@ -45,7 +46,9 @@ textureFilePaths = [
     (TownRiver      , textureDirectory ++ "settlement-town-river.png"),
     (Village        , textureDirectory ++ "settlement-village.png"),
     (VillageForest  , textureDirectory ++ "settlement-village-forest.png"),
-    (VillageMountain, textureDirectory ++ "settlement-village-mountain.png")
+    (VillageMountain, textureDirectory ++ "settlement-village-mountain.png"),
+    -- Water
+    (Water          , textureDirectory ++ "sea.png")
   ]
 
 makeModels :: (ContextHandler ctx, MonadIO m)
@@ -57,7 +60,7 @@ makeModels board = do
 
   let instances = tileInstances board
 
-      baseColour = V4 0.08 0.02 0.02 1
+      baseColour = V4 0.02 0.01 0.05 1
 
       makeModel path = do
         texture <- fromPng path
@@ -76,7 +79,7 @@ tileVertices =
  where
   --    position         u    v
   -- Hexagon centre
-  c  = (0, V2 0.5  0.5 )
+  c  = (0           , V2 0.5  0.5 )
   -- The corners of the hexagon
   ne = (hexNorthEast, V2 0    0.75)
   n  = (hexNorth    , V2 0.5  1   )
@@ -112,20 +115,8 @@ tileInstances :: Board -> Map Tile [M44 Float]
 tileInstances board =
   M.foldlWithKey' insertInstance M.empty . boardTiles $ board
  where
-  insertInstance m xy t = M.insertWith (++) t [translate . offset $ xy] m
+  insertInstance m (i, j) t =
+    M.insertWith (++) t [translate . to3d . tileOffset (boardSize board) i $ j] m
 
-  (nx, ny)      = boardSize board
-  offset (x, y) = V3 (xOffset x y) 0 (yOffset y)
-
-  xOffset x y | even y    = (x' - ((nx' - 1) / 2))       * w
-              | otherwise = (x' - ((nx' - 1) / 2) + 0.5) * w
-   where
-    w   = sqrt 3
-    x'  = fromIntegral x
-    nx' = fromIntegral nx
-
-  yOffset y = (y' - ((ny' - 1) / 2)) * h
-   where
-    h   = 3 / 2
-    y'  = fromIntegral y
-    ny' = fromIntegral ny
+  to3d :: Num a => (a, a) -> V3 a
+  to3d (x, z) = V3 x 0 z

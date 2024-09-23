@@ -56,11 +56,11 @@ fullscreen :: Bool
 fullscreen = false
 
 windowHeight, windowWidth :: Maybe Int
---windowHeight = Just 1080
---windowWidth = Just 1920
+windowHeight = Just 1080
+windowWidth = Just 1920
 
-windowHeight = Just 1440
-windowWidth = Just 2560
+--windowHeight = Just 1440
+--windowWidth = Just 2560
 
 --windowHeight = Nothing
 --windowWidth = Nothing

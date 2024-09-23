@@ -3,6 +3,7 @@ module App.Graphics.Board (
 ) where
 
 import Control.Arrow
+import Control.Monad.IO.Class
 import Control.Monad.Random
 import Data.Map (Map)
 import Graphics.GPipe
@@ -18,11 +19,13 @@ mapTexturePath = "assets/textures/map.png"
 makeModels :: (ContextHandler ctx, MonadIO m)
   => ContextT ctx os m (Model os, Map Tile (Model os, [M44 Float]))
 makeModels = do
+  -- Map seed
+  --let seed = 13011987
+  seed <- liftIO randomIO
   -- Tile data
   let boardWidth  = 30
       boardHeight = 21
-      board = flip evalRand (mkStdGen 13011987) . makeBoard boardWidth
-                $ boardHeight
+      board = makeBoard boardWidth boardHeight seed
 
   -- Map data
   mapTexture <- fromPng mapTexturePath

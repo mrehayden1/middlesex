@@ -58,7 +58,7 @@ game = do
   let camera = flip fmap cameraPos $ \(V2 camX camZ) ->
                   Camera {
                     camPitch = -(3 * pi) / 8,
-                    camPos   = V3 camX 0 camZ + V3 0 25 10,
+                    camPos   = V3 camX 0 camZ + V3 0 50 10,
                     camYaw   = pi / 2
                   }
 

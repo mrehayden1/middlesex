@@ -68,7 +68,7 @@ default-extensions:
 - UndecidableInstances
 
 executables:
-  middlesex-exe:
+  middlesex:
     main:                Main.hs
     source-dirs:         src
     ghc-options:

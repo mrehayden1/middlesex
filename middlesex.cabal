@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.36.0.
+-- This file has been generated from package.yaml by hpack version 0.37.0.
 --
 -- see: https://github.com/sol/hpack
 
@@ -23,7 +23,7 @@ source-repository head
   type: git
   location: https://github.com/mrehayden1/middlesex
 
-executable middlesex-exe
+executable middlesex
   main-is: Main.hs
   other-modules:
       App.Env
