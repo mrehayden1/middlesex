@@ -7,7 +7,7 @@ module App.Graphics.Camera (
 import Control.Lens
 import Linear
 
-import App.Matrix
+import App.Math.Matrix
 
 data Camera a = Camera {
   camPitch :: !a,    -- Anticlockwise looking down x

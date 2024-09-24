@@ -1,5 +1,7 @@
 module App.Graphics.Board.Tile (
-  makeModels
+  makeModels,
+
+  instances
 ) where
 
 import Control.Arrow
@@ -11,7 +13,7 @@ import Graphics.GPipe
 import App.Game.Board
 import App.Graphics.Env
 import App.Graphics.Texture
-import App.Matrix
+import App.Math.Matrix
 
 textureDirectory :: FilePath
 textureDirectory = "assets/textures/hextiles/"
@@ -52,23 +54,18 @@ textureFilePaths = [
   ]
 
 makeModels :: (ContextHandler ctx, MonadIO m)
-  => Board
-  -> ContextT ctx os m (Map Tile (Model os, [M44 Float]))
-makeModels board = do
+  => ContextT ctx os m (Map Tile (Model os))
+makeModels = do
   vertexBuffer :: Buffer os BVertex <- newBuffer . length $ tileVertices
   writeBuffer vertexBuffer 0 tileVertices
 
-  let instances = tileInstances board
-
-      baseColour = V4 0.02 0.01 0.05 1
+  let baseColour = V4 0.02 0.01 0.05 1
 
       makeModel path = do
         texture <- fromPng path
         return . Model (Material texture baseColour) TriangleFan $ vertexBuffer
 
-  models <- fmap M.fromList . mapM (traverse makeModel) $ textureFilePaths
-
-  return . M.intersectionWithKey (const (,)) models $ instances
+  fmap M.fromList . mapM (traverse makeModel) $ textureFilePaths
 
   -- Create vertices (positions and UVs) of the regular hexagon with unit size
 -- (outer diameter) in 2D space.
@@ -111,12 +108,16 @@ tileVertices =
 -- Make the instance data of a pointy-top oriented hextile board with unit size
 -- (half the height of a tile). where the origin is in the middle of the board
 -- and the even rows are offset by one half width.
-tileInstances :: Board -> Map Tile [M44 Float]
-tileInstances board =
+instances :: Board -> Map Tile [M44 Float]
+instances board =
   M.foldlWithKey' insertInstance M.empty . boardTiles $ board
  where
-  insertInstance m (i, j) t =
-    M.insertWith (++) t [translate . to3d . tileOffset (boardSize board) i $ j] m
+  insertInstance m idx t =
+    M.insertWith
+      (++)
+      t
+      [translate . to3d . tileMapTranslation (boardSize board) $ idx]
+      m
 
-  to3d :: Num a => (a, a) -> V3 a
-  to3d (x, z) = V3 x 0 z
+  to3d :: Num a => V2 a -> V3 a
+  to3d (V2 x z) = V3 x 0 z

@@ -1,4 +1,5 @@
 module App.Graphics.Env (
+  Window',
   Renderer,
   runRenderer,
 
@@ -17,9 +18,11 @@ module App.Graphics.Env (
 
   Material(..),
 
-  Window'
+  Scene(..),
 ) where
 
+import App.Game.Board
+import App.Graphics.Camera
 import App.Graphics.Texture
 import Control.Monad.Exception
 import Control.Monad.Reader
@@ -53,6 +56,12 @@ type Vertex = (V3 Float, V2 Float)
 type BVertex = (B3 Float, B2 Float)
 
 type InstanceBuffer os = Buffer os (V4 (B4 Float))
+
+data Scene = Scene {
+    sceneBoard :: Board,
+    sceneCamera :: Camera Float,
+    sceneSelection :: Maybe (Int, Int)
+  }
 
 data Model os = Model {
     modelMaterial :: Material os,

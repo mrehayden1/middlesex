@@ -15,6 +15,7 @@ import Control.Monad.Ref
 import Control.Monad.Fix
 import Control.Monad.IO.Class
 import Control.Monad.Reader
+import Linear.Affine
 import Reflex
 import Reflex.Host.Class
 
@@ -26,7 +27,7 @@ type App os t m = (MonadIO m, MonadIO (Performable m), MonadFix m,
   PostBuild t m, TriggerEvent t m, MonadReader (Env os t) m)
 
 data Env os t = Env {
-     eCursorPos :: Event t (Int, Int),
+     eCursorPos :: Event t (Point V2 Int), -- Point in screen space
      eKey :: Event t (Key, KeyState),
      eMouseButton :: Event t (MouseButton, MouseButtonState),
      eTick :: Event t DeltaT,
@@ -44,7 +45,7 @@ initialise :: (m ~ SpiderHost Global, t ~ SpiderTimeline Global)
        ContextT Handle os m (Maybe Bool),
        DeltaT -> IO ())
 initialise name = do
-  (window, renderScene, windowSize) <- lift . Graphics.initialise $ name
+  (window, windowSize, renderScene) <- lift . Graphics.initialise $ name
 
   -- Create input events.
   (eKey, keyTrigger) <- newTriggerEvent
@@ -52,7 +53,7 @@ initialise name = do
 
   (eCursorPos, cursorPosTrigger) <- newTriggerEvent
   _ <- lift . setCursorPosCallback window . Just $
-         \x y -> cursorPosTrigger (round x, round y)
+         \x y -> cursorPosTrigger . P . V2 (round x) $ round y
 
   (eMouseButton, mouseButtonTrigger) <- newTriggerEvent
   _ <- lift . setMouseButtonCallback window . Just $

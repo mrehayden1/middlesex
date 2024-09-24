@@ -33,6 +33,7 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Exception
 import Control.Monad.IO.Class
+import Data.Map
 import Data.Maybe
 import Graphics.GPipe
 import qualified Graphics.GPipe as GPipe
@@ -40,13 +41,12 @@ import Graphics.GPipe.Context.GLFW
 import qualified Graphics.UI.GLFW as GLFW
 import Linear
 
-import App.Graphics.Board
+import App.Graphics.Board as Board
+import App.Graphics.Board.Tile as Tile
 import App.Graphics.Camera
 import App.Graphics.Env
 import qualified App.Graphics.Text as Text
 import App.Graphics.Projection
-
-type Scene = Camera Float
 
 maxInstances :: Int
 maxInstances = 1024
@@ -121,8 +121,8 @@ initialise :: (ctx ~ Handle, MonadIO m, MonadException m)
   => String
   -> ContextT ctx os m (
          Window' os,
-         Scene -> ContextT ctx os m (),
-         WindowSize
+         WindowSize,
+         Scene -> ContextT ctx os m ()
        )
 initialise name = do
   monitor <- liftIO GLFW.getPrimaryMonitor
@@ -137,7 +137,7 @@ initialise name = do
 
   let windowConfig = WindowConfig {
           configHeight = windowHeight',
-          configHints = [],
+          configHints = [GLFW.WindowHint'Samples (Just 8)],
           -- Setting a monitor runs the app in fullscreen.
           configMonitor = if fullscreen then monitor else Nothing,
           configSwapInterval = Just 0,
@@ -151,26 +151,32 @@ initialise name = do
 
   renderText <- Text.initialise window
 
-  (mapModel, tileInstances) <- makeModels
+  (mapModel, tileModels) <- Board.makeModels
 
   instanceBuffer :: Buffer os (V4 (B4 Float)) <- newBuffer maxInstances
 
-  let renderScene camera = do
+  let renderScene Scene{..} = do
         -- Clear the colour buffer
         GPipe.render $ clearWindowColor window 0
 
         -- Camera view matrix
-        let viewM = toViewMatrix camera
+        let viewM = toViewMatrix sceneCamera
 
         -- Render the scene
         runRenderer shader $ do
           -- Render the map background
-          liftContextT . writeBuffer instanceBuffer 0 $ [identity]
+          liftContextT . writeBuffer instanceBuffer 0 . Board.instances
+            $ sceneBoard
           runShader mapModel viewM instanceBuffer 1
-          -- Render the map tiles
-          forM_ tileInstances $ \(model, instances) -> do
-            liftContextT . writeBuffer instanceBuffer 0 $ instances
-            runShader model viewM instanceBuffer . length $ instances
+
+          -- Render the board tiles
+          let tileInstances = Tile.instances sceneBoard
+          forM_ (assocs tileInstances) $ \(tile, instances') -> do
+            let model = tileModels ! tile
+            liftContextT . writeBuffer instanceBuffer 0 $ instances'
+            runShader model viewM instanceBuffer . length $ instances'
+          -- Render tile selection
+
         --renderText 0 1 (V2 960 540) "Hello, World!"
 
-  return (window, renderScene, windowSize)
+  return (window, windowSize, renderScene)

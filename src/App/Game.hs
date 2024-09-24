@@ -4,21 +4,33 @@ module App.Game (
   game
 ) where
 
+import Control.Lens
+import Control.Monad.Random
 import Control.Monad.Reader
 import Data.Bool
 import Linear
+import Linear.Affine
 import Reflex
 
 import App.Env
+import App.Game.Board
+import App.Graphics.Env
 
 data Output t = Output {
     outputQuit :: Event t (),
-    outputScene :: Event t (Camera Float)
+    outputScene :: Event t Scene
   }
 
 game :: forall os t m. App os t m => m (Output t)
 game = do
   Env{..} <- ask
+
+  -- Map seed
+  --let seed = 13011987
+  seed <- liftIO randomIO
+  let boardWidth  = 30
+      boardHeight = 21
+      board = genBoard boardWidth boardHeight seed
 
   let windowRight  = fst windowSize - 1
       windowBottom = snd windowSize - 1
@@ -28,13 +40,13 @@ game = do
   keyLeft  <- keyHeld Key'Left  eKey
   keyRight <- keyHeld Key'Right eKey
 
-  cursorWindowLeft   <- holdDyn False . fmap ((<= 0) . fst)
+  cursorWindowLeft   <- holdDyn False . fmap ((<= 0) . (^. _x))
                           $ eCursorPos
-  cursorWindowRight  <- holdDyn False . fmap ((>= windowRight) . fst)
+  cursorWindowRight  <- holdDyn False . fmap ((>= windowRight) . (^. _x))
                           $ eCursorPos
-  cursorWindowTop    <- holdDyn False . fmap ((<= 0) . snd)
+  cursorWindowTop    <- holdDyn False . fmap ((<= 0) . (^. _y))
                           $ eCursorPos
-  cursorWindowBottom <- holdDyn False . fmap ((>= windowBottom) . snd)
+  cursorWindowBottom <- holdDyn False . fmap ((>= windowBottom) . (^. _y))
                           $ eCursorPos
 
   let camMoveUp    = (||) <$> keyUp    <*> cursorWindowTop
@@ -62,19 +74,24 @@ game = do
                     camYaw   = pi / 2
                   }
 
-  cursorPos <- holdDyn (0, 0) eCursorPos
+  cursorPos <- holdDyn (P $ V2 0 0) eCursorPos
 
-  let mapClickPos = fmap (uncurry (uncurry screenMapCoords windowSize))
+  let mapClickE = fmap (uncurry (uncurry screenMapCoords windowSize))
         . tag ((,) <$> current camera <*> current cursorPos)
         . flip ffilter eMouseButton
         $ \(b, s) -> b == MouseButton'1 && s == MouseButtonState'Pressed
 
+  tileIndexClick <- holdDyn Nothing
+    . fmap (Just . fromAxial . roundAxial . toAxial . (\(V2 x y) -> (x, y))
+              . subtract (tileMapTranslation (boardWidth, boardHeight) (0, 0))
+              . unP)
+    $ mapClickE
+
   return $ Output {
       outputQuit = void . ffilter ((== Key'Escape) . fst) $ eKey,
-      outputScene = updated camera
+      outputScene = updated $ Scene board <$> camera <*> tileIndexClick
     }
  where
-  -- in tile widths
   speed :: Float
   speed = 2.5
 
@@ -86,22 +103,29 @@ keyHeld k =
   f key state = key == k &&
                   (state == KeyState'Pressed || state == KeyState'Released)
 
--- Screen coordinates as co-ordinates on the plane y = 0
-screenMapCoords :: Int -> Int -> Camera Float -> (Int, Int) -> V2 Float
-screenMapCoords viewportWidth viewportHeight cam (cursorX, cursorY) =
-  let projM' = inverseProjection viewportWidth viewportHeight
-      viewM' = inv44 . toViewMatrix $ cam
-      xNdc =   toNdc (realToFrac viewportWidth)  . realToFrac $ cursorX
+-- Screen coordinates to co-ordinates in the game map space (the world x/z
+-- plane).
+screenMapCoords :: Int -> Int -> Camera Float -> Point V2 Int -> Point V2 Float
+screenMapCoords viewportWidth viewportHeight cam (P (V2 cursorX cursorY)) =
+  let xNdc =   toNdc (realToFrac viewportWidth)  . realToFrac $ cursorX
       yNdc = -(toNdc (realToFrac viewportHeight) . realToFrac $ cursorY)
+      -- Project the point on viewport back into view space.
       V4 viewX viewY _ _ = projM' !* V4 xNdc yNdc (-1) 1
+      -- Take a unit vector pointing out the front of the camera (z = -1) and
+      -- project it into world space.
       V4 v1 v2 v3 _ = viewM' !* V4 viewX viewY (-1) 0
+      -- Camera position in world space.
       V3 a b c = camPos cam
       -- Using the vector equation of the line `(x,y,z) = (a,b,c) + tv` we
       -- solve t for y = 0 and calculate x and z
       t = -b / v2
       x = a + t * v1
       z = c + t * v3
-  in V2 x z
+  in P $ V2 x z
  where
+  projM' = inverseProjection viewportWidth viewportHeight
+  viewM' = inv44 . toViewMatrix $ cam
+
+  -- Inverse viewport transformation
   toNdc :: Float -> Float -> Float
-  toNdc d a = 2 * (a - (d / 2)) / d
+  toNdc dim x = 2 * (x - (dim / 2)) / dim

@@ -40,7 +40,8 @@ executable middlesex
       App.Graphics.Text.Font
       App.Graphics.Text.Font.Atlas
       App.Graphics.Texture
-      App.Matrix
+      App.Math
+      App.Math.Matrix
       Paths_middlesex
   hs-source-dirs:
       src
