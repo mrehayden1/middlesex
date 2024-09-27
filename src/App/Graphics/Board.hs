@@ -1,7 +1,7 @@
 module App.Graphics.Board (
   makeModels,
 
-  instances
+  mapInstances
 ) where
 
 import Control.Arrow
@@ -55,8 +55,8 @@ mapVertices =
   ne = (V2   0.5    0.5 , V2 1 0)
   nw = (V2 (-0.5)   0.5 , V2 0 0)
 
-instances :: Board -> [M44 Float]
-instances board =
+mapInstances :: Board -> [M44 Float]
+mapInstances board =
   let w = sqrt 3 * fromIntegral nx
       h = (3 * fromIntegral ny) / 2 + (1 / 2)
 

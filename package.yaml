@@ -38,6 +38,7 @@ dependencies:
 - reflex
 - ref-tf
 - time
+- transformers
 - vector
 
 ghc-options:

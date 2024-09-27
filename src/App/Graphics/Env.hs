@@ -1,13 +1,17 @@
 module App.Graphics.Env (
   Window',
+
   Renderer,
+  RenderEnv(..),
+  RenderBuffers(..),
   runRenderer,
 
   liftContextT,
 
   Shader',
   ShaderEnv(..),
-  runShader,
+
+  renderInstances,
 
   ViewMatrix,
 
@@ -21,31 +25,47 @@ module App.Graphics.Env (
   Scene(..),
 ) where
 
-import App.Game.Board
-import App.Graphics.Camera
-import App.Graphics.Texture
 import Control.Monad.Exception
 import Control.Monad.Reader
-
 import Graphics.GPipe
+
+import App.Game.Board
+import App.Graphics.Camera
+
 
 type Window' os = Window os RGBAFloat ()
 
+
 type Shader' os = CompiledShader os (ShaderEnv os)
 
+data ShaderEnv os = ShaderEnv {
+    shaderAlbedoTexture :: Texture2D os (Format RGBAFloat),
+    shaderBaseColour :: Buffer os (Uniform (B4 Float)),
+    shaderPrimitives :: PrimitiveArray Triangles (BVertex, ModelMatrix B4),
+    shaderViewMatrix :: Buffer os (Uniform (V4 (B4 Float)))
+  }
 
-newtype Renderer ctx os m a = Renderer {
-    unRenderer :: ReaderT (Shader' os, ShaderEnv os) (ContextT ctx os m) a
-  } deriving (Applicative, Functor, Monad)
 
-liftContextT :: Monad m => ContextT ctx os m a -> Renderer ctx os m a
-liftContextT = Renderer . lift
+type Renderer ctx os m = ReaderT (RenderEnv os) (ContextT ctx os m)
 
-getEnv :: Monad m => Renderer ctx os m (ShaderEnv os)
-getEnv = Renderer . asks $ snd
+runRenderer :: RenderEnv os -> Renderer ctx os m a -> ContextT ctx os m a
+runRenderer = flip runReaderT
 
-getShader :: Monad m => Renderer ctx os m (Shader' os)
-getShader = Renderer . asks $ fst
+data RenderEnv os = RenderEnv {
+    rendererBuffers :: RenderBuffers os,
+    rendererShader :: Shader' os
+  }
+
+-- Pre allocated buffers for uniforms, instances, etc
+data RenderBuffers os = RenderBuffers {
+    renderBufferBaseColour :: Buffer os (Uniform (B4 Float)),
+    renderBufferInstances :: Buffer os (V4 (B4 Float)),
+    renderBufferViewMatrix :: Buffer os (Uniform (V4 (B4 Float)))
+  }
+
+
+liftContextT :: ContextT ctx os m a -> Renderer ctx os m a
+liftContextT = ReaderT . const
 
 
 type ViewMatrix = M44 Float
@@ -55,7 +75,6 @@ type ModelMatrix v = V4 (v Float)
 type Vertex = (V3 Float, V2 Float)
 type BVertex = (B3 Float, B2 Float)
 
-type InstanceBuffer os = Buffer os (V4 (B4 Float))
 
 data Scene = Scene {
     sceneBoard :: Board,
@@ -74,60 +93,40 @@ data Material os = Material {
     materialBaseColour :: V4 Float
   }
 
-data ShaderEnv os = ShaderEnv {
-    shaderEnvAlbedoTexture :: Texture2D os (Format RGBAFloat),
-    shaderEnvBaseColour :: Buffer os (Uniform (B4 Float)),
-    shaderEnvPrimitives :: PrimitiveArray Triangles (BVertex, ModelMatrix B4),
-    shaderEnvViewMatrix :: Buffer os (Uniform (V4 (B4 Float)))
-  }
-
-runRenderer :: (ContextHandler ctx, MonadIO m)
-  => CompiledShader os (ShaderEnv os)
-  -> Renderer ctx os m a
-  -> ContextT ctx os m a
-runRenderer shader renderer = do
-  -- View matrix
-  viewMBuffer :: Buffer os (Uniform (V4 (B4 Float))) <- newBuffer 1
-  -- Albedo
-  baseColour :: Buffer os (Uniform (B4 Float)) <- newBuffer 1
-  defaultAlbedoTexture <- makeDefaultAlbedoTexture
-
-  let env = ShaderEnv {
-          shaderEnvAlbedoTexture = defaultAlbedoTexture,
-          shaderEnvBaseColour = baseColour,
-          shaderEnvPrimitives = undefined,
-          shaderEnvViewMatrix = viewMBuffer
-        }
-
-  flip runReaderT (shader, env) . unRenderer $ renderer
-
 -- Render `n` instances of the given model with the shader in the current
 -- environment. We do it this way so we can pre-allocate the instance buffer
 -- and continuously write to it.
-runShader :: (ContextHandler ctx, MonadIO m, MonadException m)
+renderInstances :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Model os
   -> ViewMatrix
-  -> InstanceBuffer os
+  -> [M44 Float]
   -> Int
   -> Renderer ctx os m ()
-runShader Model{..} viewM instances n = do
-  env@ShaderEnv{..} <- getEnv
-  shader <- getShader
+renderInstances Model{..} viewM instances n = do
+  shader <- asks rendererShader
+  RenderBuffers{..} <- asks rendererBuffers
 
-  let Material{..} = modelMaterial
+  liftContextT $ do
+    writeBuffer renderBufferInstances 0 instances
 
-  liftContextT . writeBuffer shaderEnvBaseColour 0 $ [materialBaseColour]
-  liftContextT . writeBuffer shaderEnvViewMatrix 0 $ [viewM]
+    let Material{..} = modelMaterial
 
-  liftContextT . render $ do
-    vertexArray <- newVertexArray modelVertices
-    instancesArray <- fmap (takeVertices n) . newVertexArray $ instances
-    let primitiveArray = toPrimitiveArrayInstanced modelPrimitiveTopology (,)
-                           vertexArray instancesArray
-        env' = env {
-                   shaderEnvAlbedoTexture = materialAlbedoTexture,
-                   shaderEnvPrimitives = primitiveArray
-                 }
-    shader env'
+    writeBuffer renderBufferBaseColour 0 [materialBaseColour]
+    writeBuffer renderBufferViewMatrix 0 [viewM]
+    writeBuffer renderBufferInstances 0 instances
+
+    render $ do
+      vertexArray <- newVertexArray modelVertices
+      instancesArray <- fmap (takeVertices n) . newVertexArray
+                          $ renderBufferInstances
+      let primitiveArray = toPrimitiveArrayInstanced modelPrimitiveTopology (,)
+                             vertexArray instancesArray
+          env = ShaderEnv {
+                    shaderAlbedoTexture = materialAlbedoTexture,
+                    shaderBaseColour = renderBufferBaseColour,
+                    shaderPrimitives = primitiveArray,
+                    shaderViewMatrix = renderBufferViewMatrix
+                  }
+      shader env
 
   return ()
