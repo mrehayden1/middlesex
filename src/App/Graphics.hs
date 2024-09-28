@@ -168,9 +168,9 @@ createSceneRenderer window windowSize = do
       forM_ (assocs tileInstances) $ \(tile, instances') -> do
         let model = tileModels ! tile
         renderInstances model viewM instances' . length $ instances'
-      -- Render tile selection
 
-    --renderText 0 1 (V2 960 540) "Hello, World!"
+    -- Render text
+    renderText 0 1 (V2 1024 768) "Hello, World!"
 
 createShader :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Window' os

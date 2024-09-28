@@ -1,7 +1,7 @@
 module App.Graphics.Text (
   Font,
 
-  Renderer,
+  TextRenderer,
   initialise
 ) where
 
@@ -15,7 +15,7 @@ import Data.Vector ((!))
 import Linear
 import Graphics.GPipe hiding (Shader)
 
-import App.Graphics.Env hiding (Renderer)
+import App.Graphics.Env
 import App.Graphics.Text.Font as F
 
 type Origin = V2 Float
@@ -24,15 +24,19 @@ type TextColor = V4 Float
 
 type Shader os = CompiledShader os (PrimitiveArray Triangles (B2 Float, B2 Float))
 
-type Renderer ctx os m = TypefaceI -> TextColor -> Origin -> String -> ContextT ctx os m ()
+type TextRenderer ctx os m = TypefaceI -> TextColor -> Origin -> String -> ContextT ctx os m ()
+
+maxGlyphVertices :: Int
+maxGlyphVertices = 6 * 1024
 
 initialise :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Window' os
-  -> ContextT ctx os m (Renderer ctx os m)
+  -> ContextT ctx os m (TextRenderer ctx os m)
 initialise window = do
   font <- loadFont
   shader <- createShader window font
-  return . renderText font $ shader
+  vertexBuffer :: Buffer os (B2 Float, B2 Float) <- newBuffer maxGlyphVertices
+  return . renderText vertexBuffer font $ shader
 
 createShader :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Window' os
@@ -78,13 +82,12 @@ createShader window Font{..} = do
       (BlendingFactors SrcAlpha OneMinusSrcAlpha, BlendingFactors One Zero)
       0
 
-
-
 renderText :: (ContextHandler ctx, MonadIO m, MonadException m)
-  => Font os
+  => Buffer os (B2 Float, B2 Float)
+  -> Font os
   -> Shader os
-  -> Renderer ctx os m
-renderText Font{..} shader iVar clr orig str = do
+  -> TextRenderer ctx os m
+renderText vertexBuffer Font{..} shader iVar clr orig str = do
   let glyphs  = fontTypefaces ! iVar
       def     = fromMaybe (defaultGlyphErr iVar) . IM.lookup (ord '?') $ glyphs
       glyphs' = fst . foldl accumGlyph ([], 0) $ str
@@ -95,10 +98,10 @@ renderText Font{..} shader iVar clr orig str = do
             glyph' = fmap (transform cursor) glyph
         in (qs ++ glyph', cursor + advance)
 
-  vertexBuffer <- newBuffer . length $ glyphs'
   writeBuffer vertexBuffer 0 glyphs'
   render $ do
-    vertexArray <- newVertexArray vertexBuffer
+    vertexArray <- fmap (takeVertices (length glyphs')) .newVertexArray
+                     $ vertexBuffer
     let primitiveArray = toPrimitiveArray TriangleList vertexArray
     shader primitiveArray
 
@@ -109,4 +112,4 @@ renderText Font{..} shader iVar clr orig str = do
     msg = "createText: Default glyph '?' not found in atlas for font variant "
 
 scale :: Float
-scale = 5
+scale = 1
