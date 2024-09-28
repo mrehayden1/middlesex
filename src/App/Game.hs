@@ -14,7 +14,6 @@ import Reflex
 
 import App.Env
 import App.Game.Board
-import App.Graphics.Env
 
 data Output t = Output {
     outputQuit :: Event t (),

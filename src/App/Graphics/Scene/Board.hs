@@ -1,4 +1,4 @@
-module App.Graphics.Board (
+module App.Graphics.Scene.Board (
   makeModels,
 
   mapInstances
@@ -10,8 +10,8 @@ import Data.Map (Map)
 import Graphics.GPipe
 
 import App.Game.Board
-import qualified App.Graphics.Board.Tile as Tile
-import App.Graphics.Env
+import qualified App.Graphics.Scene.Board.Tile as Tile
+import App.Graphics.Scene.Model
 import App.Graphics.Texture
 import App.Math.Matrix
 

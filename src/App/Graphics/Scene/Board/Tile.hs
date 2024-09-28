@@ -1,4 +1,4 @@
-module App.Graphics.Board.Tile (
+module App.Graphics.Scene.Board.Tile (
   makeModels,
 
   instances
@@ -11,7 +11,7 @@ import qualified Data.Map as M
 import Graphics.GPipe
 
 import App.Game.Board
-import App.Graphics.Env
+import App.Graphics.Scene.Model
 import App.Graphics.Texture
 import App.Math.Matrix
 

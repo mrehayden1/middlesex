@@ -1,9 +1,10 @@
 module App.Graphics (
   module App.Graphics.Camera,
   module App.Graphics.Projection,
+
   module Linear,
 
-  Scene,
+  Scene(..),
 
   initialise,
 
@@ -34,42 +35,34 @@ import Control.Monad
 import Control.Monad.Exception
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Maybe
-import Data.Map
 import Data.Maybe
 import Graphics.GPipe
-import qualified Graphics.GPipe as GPipe
 import Graphics.GPipe.Context.GLFW
 import qualified Graphics.UI.GLFW as GLFW
 import Linear
 
-import App.Graphics.Board as Board
-import App.Graphics.Board.Tile as Tile
 import App.Graphics.Camera
-import App.Graphics.Env
-import qualified App.Graphics.Text as Text
 import App.Graphics.Projection
+import App.Graphics.Scene
+import qualified App.Graphics.Text as Text
+import App.Graphics.Window
 
 defaultDpi :: Int
 defaultDpi = 240
 
-maxInstances :: Int
-maxInstances = 1024
-
 fullscreen :: Bool
---fullscreen = true
-fullscreen = false
+--fullscreen = True
+fullscreen = False
 
 windowHeight, windowWidth :: Maybe Int
-windowHeight = Just 1080
-windowWidth = Just 1920
+--windowHeight = Just 1080
+--windowWidth = Just 1920
 
---windowHeight = Just 1440
---windowWidth = Just 2560
+windowHeight = Just 1440
+windowWidth = Just 2560
 
 --windowHeight = Nothing
 --windowWidth = Nothing
-
-type WindowSize = (Int, Int)
 
 -- When no window size can be determined, either from the setting above or the
 -- primary monitor's current video mode, we default to these values.
@@ -114,7 +107,14 @@ initialise name = do
 
   renderScene <- createSceneRenderer window windowSize
 
-  return (window, windowSize, renderScene)
+  renderText <- Text.initialise window windowSize
+
+  let render' scene = do
+        renderScene scene
+        -- Render text
+        renderText 0 (V4 0 0 0 1) 100 (V2 1024 768) "Hello, Worldy!"
+
+  return (window, windowSize, render')
 
 getDpi :: MaybeT IO Int
 getDpi = do
@@ -127,94 +127,3 @@ getDpi = do
  where
   mmToIn :: Int -> Float
   mmToIn = (/ 25.4) . fromIntegral
-
-createSceneRenderer :: (ContextHandler ctx, MonadIO m, MonadException m)
-  => Window' os
-  -> WindowSize
-  -> ContextT ctx os m (Scene -> ContextT ctx os m ())
-createSceneRenderer window windowSize = do
-  shader <- createShader window windowSize
-
-  renderText <- Text.initialise window
-
-  (mapModel, tileModels) <- Board.makeModels
-
-  -- Preallocate buffers
-  instanceBuffer :: Buffer os (V4 (B4 Float)) <- newBuffer maxInstances
-  uniformsBuffer :: Buffer os (Uniform UniformsB) <- newBuffer 1
-
-  let renderEnv = RenderEnv {
-        rendererBuffers = RenderBuffers {
-            renderBufferInstances = instanceBuffer,
-            renderBufferUniforms = uniformsBuffer
-          },
-        rendererShader = shader
-      }
-
-  return $ \Scene{..} -> do
-    -- Clear the colour buffer
-    GPipe.render $ clearWindowColor window 0
-
-    -- Camera view matrix
-    let viewM = toViewMatrix sceneCamera
-
-    -- Render the scene
-    runRenderer renderEnv $ do
-      -- Render the map background
-      renderInstances mapModel viewM (Board.mapInstances sceneBoard) 1
-
-      -- Render the board tiles
-      let tileInstances = Tile.instances sceneBoard
-      forM_ (assocs tileInstances) $ \(tile, instances') -> do
-        let model = tileModels ! tile
-        renderInstances model viewM instances' . length $ instances'
-
-    -- Render text
-    renderText 0 1 (V2 1024 768) "Hello, World!"
-
-createShader :: (ContextHandler ctx, MonadIO m, MonadException m)
-  => Window' os
-  -> WindowSize
-  -> ContextT ctx os m (Shader' os)
-createShader window (vw, vh) = do
-  compileShader $ do
-    -- Textures
-    let sampleFilter = SamplerFilter Linear Linear Linear (Just 3)
-    sampler <- newSampler2D $ \s ->
-      (shaderAlbedoTexture s, sampleFilter, (pure Repeat, undefined))
-
-    -- Uniforms
-    vertexUniforms <- getUniform ((, 0) . shaderUniforms)
-    fragmentUniforms <- getUniform ((, 0) . shaderUniforms)
-
-    --  Matrices
-    let viewMatrix = viewMatrixS vertexUniforms
-    --  Base colour
-        baseColour = baseColourS fragmentUniforms
-
-    -- Vertex shader
-    primitiveStream <- toPrimitiveStream shaderPrimitives
-    let primitiveStream' = flip fmap primitiveStream $
-          \((V3 x y z, uv), modelMatrix) ->
-             (projection vw vh !*! viewMatrix !*! modelMatrix !* V4 x y z 1, uv)
-
-    -- Fragment shader
-    let shadeFragment =
-          (* baseColour) . sample2D sampler SampleAuto Nothing Nothing
-
-    fragmentStream <- fmap (fmap shadeFragment)
-      . flip rasterize primitiveStream'
-      . const $
-          (FrontAndBack,
-           ViewPort (V2 0 0) (V2 vw vh),
-           DepthRange 0 1
-          )
-    flip drawWindowColor fragmentStream $
-      const (window, ContextColorOption blending (pure True))
-
- where
-  blending =
-    BlendRgbAlpha
-      (FuncAdd, FuncAdd)
-      (BlendingFactors SrcAlpha OneMinusSrcAlpha, BlendingFactors One Zero)
-      0

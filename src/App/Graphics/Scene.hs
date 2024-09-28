@@ -1,28 +1,6 @@
-module App.Graphics.Env (
-  Window',
-
+module App.Graphics.Scene (
   Renderer,
-  RenderEnv(..),
-  RenderBuffers(..),
-  runRenderer,
-
-  liftContextT,
-
-  Shader',
-  ShaderEnv(..),
-  UniformsB,
-  UniformsS(..),
-
-  renderInstances,
-
-  ViewMatrix,
-
-  Model(..),
-
-  Vertex,
-  BVertex,
-
-  Material(..),
+  createSceneRenderer,
 
   Scene(..),
 ) where
@@ -30,14 +8,19 @@ module App.Graphics.Env (
 import Control.Arrow
 import Control.Monad.Exception
 import Control.Monad.Reader
+import Data.Map
 import Graphics.GPipe
 
 import App.Game.Board
 import App.Graphics.Camera
+import App.Graphics.Projection
+import App.Graphics.Scene.Board as Board
+import App.Graphics.Scene.Board.Tile as Tile
+import App.Graphics.Scene.Model
+import App.Graphics.Window
 
-
-type Window' os = Window os RGBAFloat ()
-
+maxInstances :: Int
+maxInstances = 1024
 
 type Shader' os = CompiledShader os (ShaderEnv os)
 
@@ -107,26 +90,50 @@ type ViewMatrix = M44 Float
 
 type ModelMatrix v = V4 (v Float)
 
-type Vertex = (V3 Float, V2 Float)
-type BVertex = (B3 Float, B2 Float)
-
-
 data Scene = Scene {
     sceneBoard :: Board,
     sceneCamera :: Camera Float,
     sceneSelection :: Maybe (Int, Int)
   }
 
-data Model os = Model {
-    modelMaterial :: Material os,
-    modelPrimitiveTopology :: PrimitiveTopology Triangles,
-    modelVertices :: Buffer os BVertex
-  }
+createSceneRenderer :: (ContextHandler ctx, MonadIO m, MonadException m)
+  => Window' os
+  -> WindowSize
+  -> ContextT ctx os m (Scene -> ContextT ctx os m ())
+createSceneRenderer window windowSize = do
+  shader <- createShader window windowSize
 
-data Material os = Material {
-    materialAlbedoTexture :: Texture2D os (Format RGBAFloat),
-    materialBaseColour :: V4 Float
-  }
+  (mapModel, tileModels) <- Board.makeModels
+
+  -- Preallocate buffers
+  instanceBuffer :: Buffer os (V4 (B4 Float)) <- newBuffer maxInstances
+  uniformsBuffer :: Buffer os (Uniform UniformsB) <- newBuffer 1
+
+  let renderEnv = RenderEnv {
+        rendererBuffers = RenderBuffers {
+            renderBufferInstances = instanceBuffer,
+            renderBufferUniforms = uniformsBuffer
+          },
+        rendererShader = shader
+      }
+
+  return $ \Scene{..} -> do
+    -- Clear the colour buffer
+    render $ clearWindowColor window 0
+
+    -- Camera view matrix
+    let viewM = toViewMatrix sceneCamera
+
+    -- Render the scene
+    runRenderer renderEnv $ do
+      -- Render the map background
+      renderInstances mapModel viewM (Board.mapInstances sceneBoard) 1
+
+      -- Render the board tiles
+      let tileInstances = Tile.instances sceneBoard
+      forM_ (assocs tileInstances) $ \(tile, instances') -> do
+        let model = tileModels ! tile
+        renderInstances model viewM instances' . length $ instances'
 
 -- Render `n` instances of the given model with the shader in the current
 -- environment. We do it this way so we can pre-allocate the instance buffer
@@ -137,7 +144,7 @@ renderInstances :: (ContextHandler ctx, MonadIO m, MonadException m)
   -> [M44 Float]
   -> Int
   -> Renderer ctx os m ()
-renderInstances Model{..} viewM instances n = do
+renderInstances Model{..} viewM instances' n = do
   shader <- asks rendererShader
   RenderBuffers{..} <- asks rendererBuffers
 
@@ -153,7 +160,7 @@ renderInstances Model{..} viewM instances n = do
     writeBuffer renderBufferUniforms 0 [shaderUniforms]
 
     -- Buffer instances
-    writeBuffer renderBufferInstances 0 instances
+    writeBuffer renderBufferInstances 0 instances'
 
     render $ do
       vertexArray <- newVertexArray modelVertices
@@ -169,3 +176,50 @@ renderInstances Model{..} viewM instances n = do
       shader env
 
   return ()
+
+createShader :: (ContextHandler ctx, MonadIO m, MonadException m)
+  => Window' os
+  -> WindowSize
+  -> ContextT ctx os m (Shader' os)
+createShader window (vw, vh) =
+  compileShader $ do
+    -- Textures
+    let sampleFilter = SamplerFilter Linear Linear Linear (Just 3)
+    sampler <- newSampler2D $ \s ->
+      (shaderAlbedoTexture s, sampleFilter, (pure Repeat, undefined))
+
+    -- Uniforms
+    vertexUniforms <- getUniform ((, 0) . shaderUniforms)
+    fragmentUniforms <- getUniform ((, 0) . shaderUniforms)
+
+    --  Matrices
+    let viewMatrix = viewMatrixS vertexUniforms
+    --  Base colour
+        baseColour = baseColourS fragmentUniforms
+
+    -- Vertex shader
+    primitiveStream <- toPrimitiveStream shaderPrimitives
+    let primitiveStream' = flip fmap primitiveStream $
+          \((V3 x y z, uv), modelMatrix) ->
+             (projection vw vh !*! viewMatrix !*! modelMatrix !* V4 x y z 1, uv)
+
+    -- Fragment shader
+    let shadeFragment =
+          (* baseColour) . sample2D sampler SampleAuto Nothing Nothing
+
+    fragmentStream <- fmap (fmap shadeFragment)
+      . flip rasterize primitiveStream'
+      . const $
+          (FrontAndBack,
+           ViewPort (V2 0 0) (V2 vw vh),
+           DepthRange 0 1
+          )
+    flip drawWindowColor fragmentStream $
+      const (window, ContextColorOption blending (pure True))
+
+ where
+  blending =
+    BlendRgbAlpha
+      (FuncAdd, FuncAdd)
+      (BlendingFactors SrcAlpha OneMinusSrcAlpha, BlendingFactors One Zero)
+      0
