@@ -53,6 +53,7 @@ ghc-options:
 - -Wredundant-constraints
 
 default-extensions:
+- Arrows
 - ConstraintKinds
 - DeriveGeneric
 - FlexibleContexts

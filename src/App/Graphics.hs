@@ -141,14 +141,12 @@ createSceneRenderer window windowSize = do
 
   -- Preallocate buffers
   instanceBuffer :: Buffer os (V4 (B4 Float)) <- newBuffer maxInstances
-  viewMatrixBuffer :: Buffer os (Uniform (V4 (B4 Float))) <- newBuffer 1
-  baseColourBuffer :: Buffer os (Uniform (B4 Float)) <- newBuffer 1
+  uniformsBuffer :: Buffer os (Uniform UniformsB) <- newBuffer 1
 
   let renderEnv = RenderEnv {
         rendererBuffers = RenderBuffers {
-            renderBufferBaseColour = baseColourBuffer,
             renderBufferInstances = instanceBuffer,
-            renderBufferViewMatrix = viewMatrixBuffer
+            renderBufferUniforms = uniformsBuffer
           },
         rendererShader = shader
       }
@@ -185,17 +183,20 @@ createShader window (vw, vh) = do
     sampler <- newSampler2D $ \s ->
       (shaderAlbedoTexture s, sampleFilter, (pure Repeat, undefined))
 
-    -- Matrices
-    viewM <- getUniform ((, 0) . shaderViewMatrix)
+    -- Uniforms
+    vertexUniforms <- getUniform ((, 0) . shaderUniforms)
+    fragmentUniforms <- getUniform ((, 0) . shaderUniforms)
 
-    -- Base colour
-    baseColour <- getUniform ((, 0) . shaderBaseColour)
+    --  Matrices
+    let viewMatrix = viewMatrixS vertexUniforms
+    --  Base colour
+        baseColour = baseColourS fragmentUniforms
 
     -- Vertex shader
     primitiveStream <- toPrimitiveStream shaderPrimitives
     let primitiveStream' = flip fmap primitiveStream $
-          \((V3 x y z, uv), modelM) ->
-             (projection vw vh !*! viewM !*! modelM !* V4 x y z 1, uv)
+          \((V3 x y z, uv), modelMatrix) ->
+             (projection vw vh !*! viewMatrix !*! modelMatrix !* V4 x y z 1, uv)
 
     -- Fragment shader
     let shadeFragment =

@@ -10,6 +10,8 @@ module App.Graphics.Env (
 
   Shader',
   ShaderEnv(..),
+  UniformsB,
+  UniformsS(..),
 
   renderInstances,
 
@@ -25,6 +27,7 @@ module App.Graphics.Env (
   Scene(..),
 ) where
 
+import Control.Arrow
 import Control.Monad.Exception
 import Control.Monad.Reader
 import Graphics.GPipe
@@ -40,11 +43,44 @@ type Shader' os = CompiledShader os (ShaderEnv os)
 
 data ShaderEnv os = ShaderEnv {
     shaderAlbedoTexture :: Texture2D os (Format RGBAFloat),
-    shaderBaseColour :: Buffer os (Uniform (B4 Float)),
     shaderPrimitives :: PrimitiveArray Triangles (BVertex, ModelMatrix B4),
-    shaderViewMatrix :: Buffer os (Uniform (V4 (B4 Float)))
+    shaderUniforms :: Buffer os (Uniform UniformsB)
   }
 
+data Uniforms = Uniforms {
+    baseColour :: V4 Float,
+    viewMatrix :: M44 Float
+  }
+
+data UniformsB = UniformsB {
+    baseColourB :: B4 Float,
+    viewMatrixB :: V4 (B4 Float)
+  }
+
+data UniformsS x = UniformsS {
+    baseColourS :: V4 (S x Float),
+    viewMatrixS :: M44 (S x Float)
+  }
+
+instance BufferFormat UniformsB where
+  type HostFormat UniformsB = Uniforms
+  toBuffer = proc ~(Uniforms{..}) -> do
+               baseColour' <- toBuffer -< baseColour
+               viewMatrix' <- toBuffer -< viewMatrix
+               returnA -< UniformsB {
+                              baseColourB = baseColour',
+                              viewMatrixB = viewMatrix'
+                            }
+
+instance UniformInput UniformsB where
+  type UniformFormat UniformsB x = UniformsS x
+  toUniform = proc ~(UniformsB{..}) -> do
+                baseColour' <- toUniform -< baseColourB
+                viewMatrix' <- toUniform -< viewMatrixB
+                returnA -< UniformsS {
+                               baseColourS = baseColour',
+                               viewMatrixS = viewMatrix'
+                             }
 
 type Renderer ctx os m = ReaderT (RenderEnv os) (ContextT ctx os m)
 
@@ -58,9 +94,8 @@ data RenderEnv os = RenderEnv {
 
 -- Pre allocated buffers for uniforms, instances, etc
 data RenderBuffers os = RenderBuffers {
-    renderBufferBaseColour :: Buffer os (Uniform (B4 Float)),
     renderBufferInstances :: Buffer os (V4 (B4 Float)),
-    renderBufferViewMatrix :: Buffer os (Uniform (V4 (B4 Float)))
+    renderBufferUniforms :: Buffer os (Uniform UniformsB)
   }
 
 
@@ -107,12 +142,17 @@ renderInstances Model{..} viewM instances n = do
   RenderBuffers{..} <- asks rendererBuffers
 
   liftContextT $ do
-    writeBuffer renderBufferInstances 0 instances
-
+    -- Buffer uniforms
     let Material{..} = modelMaterial
 
-    writeBuffer renderBufferBaseColour 0 [materialBaseColour]
-    writeBuffer renderBufferViewMatrix 0 [viewM]
+    let shaderUniforms = Uniforms {
+            baseColour = materialBaseColour,
+            viewMatrix = viewM
+          }
+
+    writeBuffer renderBufferUniforms 0 [shaderUniforms]
+
+    -- Buffer instances
     writeBuffer renderBufferInstances 0 instances
 
     render $ do
@@ -123,9 +163,8 @@ renderInstances Model{..} viewM instances n = do
                              vertexArray instancesArray
           env = ShaderEnv {
                     shaderAlbedoTexture = materialAlbedoTexture,
-                    shaderBaseColour = renderBufferBaseColour,
                     shaderPrimitives = primitiveArray,
-                    shaderViewMatrix = renderBufferViewMatrix
+                    shaderUniforms = renderBufferUniforms
                   }
       shader env
 

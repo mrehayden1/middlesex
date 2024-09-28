@@ -46,6 +46,7 @@ executable middlesex
   hs-source-dirs:
       src
   default-extensions:
+      Arrows
       ConstraintKinds
       DeriveGeneric
       FlexibleContexts
