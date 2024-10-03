@@ -5,6 +5,6 @@ module App.Graphics.Window (
 
 import Graphics.GPipe
 
-type Window' os = Window os RGBAFloat ()
+type Window' os = Window os RGBAFloat Depth
 
 type WindowSize = (Int, Int)

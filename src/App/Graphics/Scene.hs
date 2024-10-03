@@ -1,6 +1,6 @@
 module App.Graphics.Scene (
   Renderer,
-  createSceneRenderer,
+  createRenderer,
 
   Scene(..),
 ) where
@@ -26,9 +26,13 @@ type Shader' os = CompiledShader os (ShaderEnv os)
 
 data ShaderEnv os = ShaderEnv {
     shaderAlbedoTexture :: Texture2D os (Format RGBAFloat),
-    shaderPrimitives :: PrimitiveArray Triangles (BVertex, ModelMatrix B4),
+    shaderPrimitives :: PrimitiveArray Triangles (BVertex, BModelMatrix),
     shaderUniforms :: Buffer os (Uniform UniformsB)
   }
+
+type ViewMatrix = M44 Float
+
+type BModelMatrix = V4 (B4 Float)
 
 data Uniforms = Uniforms {
     baseColour :: V4 Float,
@@ -86,21 +90,17 @@ liftContextT :: ContextT ctx os m a -> Renderer ctx os m a
 liftContextT = ReaderT . const
 
 
-type ViewMatrix = M44 Float
-
-type ModelMatrix v = V4 (v Float)
-
 data Scene = Scene {
     sceneBoard :: Board,
     sceneCamera :: Camera Float,
     sceneSelection :: Maybe (Int, Int)
   }
 
-createSceneRenderer :: (ContextHandler ctx, MonadIO m, MonadException m)
+createRenderer :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Window' os
   -> WindowSize
   -> ContextT ctx os m (Scene -> ContextT ctx os m ())
-createSceneRenderer window windowSize = do
+createRenderer window windowSize = do
   shader <- createShader window windowSize
 
   (mapModel, tileModels) <- Board.makeModels
@@ -118,9 +118,6 @@ createSceneRenderer window windowSize = do
       }
 
   return $ \Scene{..} -> do
-    -- Clear the colour buffer
-    render $ clearWindowColor window 0
-
     -- Camera view matrix
     let viewM = toViewMatrix sceneCamera
 

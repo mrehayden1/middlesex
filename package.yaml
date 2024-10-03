@@ -31,6 +31,7 @@ dependencies:
 - containers
 - dependent-sum
 - exception-transformers
+- fixed-vector
 - hsnoise
 - lens
 - linear
@@ -55,6 +56,7 @@ ghc-options:
 default-extensions:
 - Arrows
 - ConstraintKinds
+- DataKinds
 - DeriveGeneric
 - FlexibleContexts
 - FlexibleInstances

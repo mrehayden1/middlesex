@@ -34,7 +34,6 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Exception
 import Control.Monad.IO.Class
-import Control.Monad.Trans.Maybe
 import Data.Maybe
 import Graphics.GPipe
 import Graphics.GPipe.Context.GLFW
@@ -43,12 +42,9 @@ import Linear
 
 import App.Graphics.Camera
 import App.Graphics.Projection
-import App.Graphics.Scene
-import qualified App.Graphics.Text as Text
+import App.Graphics.Scene as Scene
+import App.Graphics.UI as UI
 import App.Graphics.Window
-
-defaultDpi :: Int
-defaultDpi = 240
 
 fullscreen :: Bool
 --fullscreen = True
@@ -81,11 +77,6 @@ initialise name = do
   mMonitor <- liftIO GLFW.getPrimaryMonitor
   mVideoMode <- liftIO . fmap join . mapM GLFW.getVideoMode $ mMonitor
 
-  -- Calculate the DPI
-  dpi <- liftIO . fmap (fromMaybe defaultDpi) . runMaybeT $ getDpi
-
-  liftIO . print $ dpi
-
   let windowHeight' = fromMaybe windowHeightFallback $
                         windowHeight <|> fmap GLFW.videoModeHeight mVideoMode
       windowWidth'  = fromMaybe windowWidthFallback $
@@ -103,27 +94,20 @@ initialise name = do
           configWidth = windowWidth'
         }
 
-  window <- newWindow (WindowFormatColor RGBA8) windowConfig
+  window <- newWindow (WindowFormatColorDepth RGBA8 Depth32) windowConfig
 
-  renderScene <- createSceneRenderer window windowSize
+  renderScene <- Scene.createRenderer window windowSize
 
-  renderText <- Text.initialise window windowSize
+  renderUi <- UI.createRenderer window windowSize
 
   let render' scene = do
+        -- Clear the colour and depth buffers
+        render $ clearWindowColor window 0
+        render $ clearWindowDepth window 0
+        -- Render scene
         renderScene scene
-        -- Render text
-        renderText 0 (V4 0 0 0 1) 100 (V2 1024 768) "Hello, Worldy!"
+        -- Clear depth buffer and render UI
+        render $ clearWindowDepth window 0
+        renderUi . UI . UICard . UIButton $ "Start"
 
   return (window, windowSize, render')
-
-getDpi :: MaybeT IO Int
-getDpi = do
-  monitor <- MaybeT GLFW.getPrimaryMonitor
-  widthMm <- liftIO . GLFW.getMonitorPhysicalSize $ monitor
-  videoMode <- MaybeT . GLFW.getVideoMode $ monitor
-  let widthIn = mmToIn . fst $ widthMm
-      widthPx = fromIntegral . GLFW.videoModeWidth $ videoMode
-  return . round $ widthPx / widthIn
- where
-  mmToIn :: Int -> Float
-  mmToIn = (/ 25.4) . fromIntegral

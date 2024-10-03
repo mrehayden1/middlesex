@@ -1,5 +1,6 @@
 module App.Graphics.Text (
   Font,
+  typefaceBody,
 
   TextRenderer,
   initialise
@@ -17,6 +18,10 @@ import Graphics.GPipe
 
 import App.Graphics.Text.Font as F
 import App.Graphics.Window
+
+
+typefaceBody :: TypefaceI
+typefaceBody = 0
 
 
 type Shader' os = CompiledShader os (ShaderEnv os)
@@ -183,4 +188,4 @@ createTextRender vertexBuffer uniformsBuffer Font{..} shader iVar clr pixelSize 
  where
   defaultGlyphErr _ = error . (msg ++) . show $ iVar
    where
-    msg = "createText: Default glyph '?' not found in atlas for font variant "
+    msg = "createText: Default glyph '?' not found in atlas for typeface "

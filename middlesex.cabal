@@ -40,6 +40,7 @@ executable middlesex
       App.Graphics.Text.Font
       App.Graphics.Text.Font.Atlas
       App.Graphics.Texture
+      App.Graphics.UI
       App.Graphics.Window
       App.Math
       App.Math.Matrix
@@ -49,6 +50,7 @@ executable middlesex
   default-extensions:
       Arrows
       ConstraintKinds
+      DataKinds
       DeriveGeneric
       FlexibleContexts
       FlexibleInstances
@@ -75,6 +77,7 @@ executable middlesex
     , containers
     , dependent-sum
     , exception-transformers
+    , fixed-vector
     , hsnoise
     , lens
     , linear
