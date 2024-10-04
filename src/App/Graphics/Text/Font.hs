@@ -6,8 +6,8 @@ module App.Graphics.Text.Font (
   GlyphVertex,
 
   TypefaceI,
-  headingTypeface,
-  debugTypeface
+  typefaceMain,
+  typefaceDebug
 ) where
 
 
@@ -28,9 +28,9 @@ glyphsFilePath = "assets/fonts/glyphs.png"
 
 type TypefaceI = Int
 
-headingTypeface, debugTypeface :: TypefaceI
-headingTypeface = 0
-debugTypeface   = 1
+typefaceMain, typefaceDebug :: TypefaceI
+typefaceMain  = 0
+typefaceDebug = 1
 
 -- An MSDF font, which has one or more typefaces.
 --
@@ -62,7 +62,7 @@ loadFont = do
   Atlas{..} <- liftIO . fmap (either error id)
     . decodeAtlasFromFile $ metadataFilePath
   -- Load the glyphs into the glyph texture
-  texture <- fromPng glyphsFilePath
+  texture <- fromLinearPng glyphsFilePath
   let vs = fmap (makeGlyphs atlasMeta) variants
       AtlasMeta{..} = atlasMeta
   return $ Font texture size distanceRange vs

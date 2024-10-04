@@ -128,12 +128,16 @@ createRenderer window windowSize@(vw, vh) = do
   -- SDF font sub-renderer
   renderText <- Text.initialise window windowSize
 
+  font <- loadFont
+
+  let text = createText font typefaceMain 32 (V2 1024 768) "Hello, World!"
+
   return $ \ui -> do
     runRenderer renderEnv $ do
       renderUi ui
 
     -- Render test text
-    --renderText typefaceBody (V4 0 0 0 1) 100 (V2 1024 768) "Hello, World!"
+    renderText 1 text
 
 createShader :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Window' os

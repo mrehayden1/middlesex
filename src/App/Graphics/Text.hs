@@ -1,6 +1,11 @@
 module App.Graphics.Text (
   Font,
-  typefaceBody,
+  loadFont,
+  typefaceMain,
+  typefaceDebug,
+
+  Text,
+  createText,
 
   TextRenderer,
   initialise
@@ -20,10 +25,6 @@ import App.Graphics.Text.Font as F
 import App.Graphics.Window
 
 
-typefaceBody :: TypefaceI
-typefaceBody = 0
-
-
 type Shader' os = CompiledShader os (ShaderEnv os)
 
 data ShaderEnv os = ShaderEnv {
@@ -32,50 +33,51 @@ data ShaderEnv os = ShaderEnv {
     shaderUniforms :: Buffer os (Uniform UniformsB)
   }
 
+type Vertex  = (V2 Float, V2 Float)
 type BVertex = (B2 Float, B2 Float)
 
 
 data Uniforms = Uniforms {
     baseColour :: V4 Float,
-    scale :: Float
+    -- Distance field range in screen pixels
+    screenPixelRange :: Float
   }
 
 data UniformsB = UniformsB {
     baseColourB :: B4 Float,
-    scaleB :: B Float
+    screenPixelRangeB :: B Float
   }
 
 data UniformsS x = UniformsS {
     baseColourS :: V4 (S x Float),
-    scaleS :: S x Float
+    screenPixelRangeS :: S x Float
   }
 
 instance BufferFormat UniformsB where
   type HostFormat UniformsB = Uniforms
   toBuffer = proc ~(Uniforms{..}) -> do
                baseColour' <- toBuffer -< baseColour
-               scale' <- toBuffer -< scale
+               screenPixelRange' <- toBuffer -< screenPixelRange
                returnA -< UniformsB {
                               baseColourB = baseColour',
-                              scaleB = scale'
+                              screenPixelRangeB = screenPixelRange'
                             }
 
 instance UniformInput UniformsB where
   type UniformFormat UniformsB x = UniformsS x
   toUniform = proc ~(UniformsB{..}) -> do
                 baseColour' <- toUniform -< baseColourB
-                scale' <- toUniform -< scaleB
+                screenPixelRange' <- toUniform -< screenPixelRangeB
                 returnA -< UniformsS {
                                baseColourS = baseColour',
-                               scaleS = scale'
+                               screenPixelRangeS = screenPixelRange'
                              }
 
-type TextRenderer ctx os m = TypefaceI -> TextColor -> PixelSize -> Origin
-       -> String -> ContextT ctx os m ()
+type TextRenderer ctx os m = TextColour -> Text os -> ContextT ctx os m ()
 
 type Origin = V2 Float
 
-type TextColor = V4 Float
+type TextColour = V4 Float
 
 type PixelSize = Float
 
@@ -88,24 +90,22 @@ initialise :: (ContextHandler ctx, MonadIO m, MonadException m)
   -> WindowSize
   -> ContextT ctx os m (TextRenderer ctx os m)
 initialise window windowSize = do
-  font <- loadFont
-  shader <- createShader window windowSize font
+  shader <- createShader window windowSize
 
   vertexBuffer :: Buffer os (B2 Float, B2 Float) <- newBuffer maxGlyphVertices
   uniformsBuffer :: Buffer os (Uniform UniformsB) <- newBuffer 1
 
-  return . createTextRender vertexBuffer uniformsBuffer font $ shader
+  return . createTextRender vertexBuffer uniformsBuffer $ shader
 
 createShader :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Window' os
   -> WindowSize
-  -> Font os
   -> ContextT ctx os m (Shader' os)
-createShader window (vw, vh) Font{..} =
+createShader window (vw, vh) =
   compileShader $ do
     let sampleFilter = SamplerFilter Linear Linear Nearest Nothing
-    sampler <- newSampler2D $ const
-                 (fontGlyphTexture, sampleFilter, (pure Repeat, undefined))
+    sampler <- newSampler2D $ \s ->
+                 (shaderTexture s, sampleFilter, (pure Repeat, undefined))
 
     let median r g b = maxB (minB r g) $ minB (maxB r g) b
 
@@ -115,7 +115,7 @@ createShader window (vw, vh) Font{..} =
     fragmentUniforms <- getUniform ((, 0) . shaderUniforms)
 
     let baseColour = baseColourS fragmentUniforms
-        scale      = scaleS fragmentUniforms
+        screenPixelRange = screenPixelRangeS fragmentUniforms
 
     primitiveStream <- toPrimitiveStream shaderPrimitives
     let primitiveStream' = flip fmap primitiveStream $ \(V2 x y, tx) ->
@@ -124,8 +124,7 @@ createShader window (vw, vh) Font{..} =
     let shadeFragment uv =
           let V4 r g b _ = sample2D sampler SampleAuto Nothing Nothing uv
               signedDist = median r g b
-              screenPxDist = (scale * realToFrac fontSdfUnitRange)
-                               * (signedDist - 0.5)
+              screenPxDist = screenPixelRange * (signedDist - 0.5)
               opacity = clamp (screenPxDist + 0.5) 0 1
           in mix 0 baseColour (pure opacity) :: V4 (S F Float)
 
@@ -147,45 +146,60 @@ createShader window (vw, vh) Font{..} =
       (BlendingFactors SrcAlpha OneMinusSrcAlpha, BlendingFactors One Zero)
       0
 
-createTextRender :: (ContextHandler ctx, MonadIO m, MonadException m)
-  => Buffer os (B2 Float, B2 Float)
-  -> Buffer os (Uniform UniformsB)
-  -> Font os
-  -> Shader' os
-  -> TextRenderer ctx os m
-createTextRender vertexBuffer uniformsBuffer Font{..} shader iVar clr pixelSize orig str = do
-  let glyphs  = fontTypefaces ! iVar
-      def     = fromMaybe (defaultGlyphErr iVar) . IM.lookup (ord '?') $ glyphs
-      glyphs' = fst . foldl accumGlyph ([], 0) $ str
+data Text os = Text {
+    textFont     :: Font os,
+    textSize     :: PixelSize,
+    textVertices :: [Vertex]
+  }
+
+createText :: Font os -> TypefaceI -> PixelSize -> Origin -> String -> Text os
+createText font@Font{..} face pixelSize orig str =
+  let glyphMap = fontTypefaces ! face
+      def      = fromMaybe (defaultGlyphErr face) . IM.lookup (ord '?')
+                   $ glyphMap
+
       transform c = first $ (+ orig) . (^* pixelSize) . (+ V2 c 0)
-      scale = pixelSize / fontSize
 
       accumGlyph (qs, cursor) char =
-        let (glyph, advance) = fromMaybe def . IM.lookup (ord char) $ glyphs
+        let (glyph, advance) = fromMaybe def . IM.lookup (ord char) $ glyphMap
             glyph' = fmap (transform cursor) glyph
         in (qs ++ glyph', cursor + advance)
 
-  writeBuffer vertexBuffer 0 glyphs'
+   in Text {
+          textFont     = font,
+          textSize     = pixelSize,
+          textVertices = fst . foldl accumGlyph ([], 0) $ str
+        }
+ where
+  defaultGlyphErr _ = error . (msg ++) . show $ face
+   where
+    msg = "createText: Default glyph '?' not found in atlas for typeface "
+
+createTextRender :: (ContextHandler ctx, MonadIO m, MonadException m)
+  => Buffer os (B2 Float, B2 Float)
+  -> Buffer os (Uniform UniformsB)
+  -> Shader' os
+  -> TextColour
+  -> Text os
+  -> ContextT ctx os m ()
+createTextRender vertexBuffer uniformsBuffer shader clr Text{..} = do
+  writeBuffer vertexBuffer 0 textVertices
 
   let uniforms = Uniforms {
           baseColour = clr,
-          scale = scale
+          screenPixelRange = (textSize / fontSize textFont)
+                               * fontSdfUnitRange textFont
         }
 
   writeBuffer uniformsBuffer 0 [uniforms]
 
   render $ do
-    vertexArray <- fmap (takeVertices (length glyphs')) . newVertexArray
+    vertexArray <- fmap (takeVertices (length textVertices)) . newVertexArray
                      $ vertexBuffer
     let primitiveArray = toPrimitiveArray TriangleList vertexArray
         env = ShaderEnv {
-                  shaderTexture = fontGlyphTexture,
+                  shaderTexture = fontGlyphTexture textFont,
                   shaderPrimitives = primitiveArray,
                   shaderUniforms = uniformsBuffer
                 }
     shader env
-
- where
-  defaultGlyphErr _ = error . (msg ++) . show $ iVar
-   where
-    msg = "createText: Default glyph '?' not found in atlas for typeface "

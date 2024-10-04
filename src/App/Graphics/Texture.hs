@@ -1,6 +1,9 @@
 module App.Graphics.Texture (
   fromJpeg,
+  fromLinearJpeg,
+
   fromPng,
+  fromLinearPng,
 
   NineSlice(..),
   fromNineSlicePng,
@@ -12,6 +15,7 @@ import Codec.Picture.Jpg
 import Codec.Picture.Png
 import Codec.Picture.Types
 import Control.Monad.IO.Class
+import Data.Bool
 import Data.ByteString
 import qualified Data.Vector.Fixed as V
 import Data.Vector.Fixed.Boxed
@@ -20,21 +24,35 @@ import qualified Data.ByteString as BS
 import Graphics.GPipe hiding (Image)
 import Linear.Affine
 
+type GammaCorrected = Bool
+
 fromJpeg :: (ContextHandler ctx, MonadIO m)
   => FilePath
   -> ContextT ctx os m (Texture2D os (Format RGBAFloat))
-fromJpeg = fromImageWithDecoder decodeJpeg
+fromJpeg file = fromImageWithDecoder decodeJpeg file True
+
+fromLinearJpeg :: (ContextHandler ctx, MonadIO m)
+  => FilePath
+  -> ContextT ctx os m (Texture2D os (Format RGBAFloat))
+fromLinearJpeg file = fromImageWithDecoder decodeJpeg file False
+
 
 fromPng :: (ContextHandler ctx, MonadIO m)
   => FilePath
   -> ContextT ctx os m (Texture2D os (Format RGBAFloat))
-fromPng = fromImageWithDecoder decodePng
+fromPng file = fromImageWithDecoder decodePng file True
+
+fromLinearPng :: (ContextHandler ctx, MonadIO m)
+  => FilePath
+  -> ContextT ctx os m (Texture2D os (Format RGBAFloat))
+fromLinearPng file = fromImageWithDecoder decodePng file False
 
 fromImageWithDecoder :: (ContextHandler ctx, MonadIO m)
   => (ByteString -> Either String DynamicImage)
   -> FilePath
+  -> GammaCorrected
   -> ContextT ctx os m (Texture2D os (Format RGBAFloat))
-fromImageWithDecoder decode filePath = do
+fromImageWithDecoder decode filePath gamma = do
   bytes <- liftIO . BS.readFile $ filePath
   let image@Image{..} = either error rgba8ImagefromDynamicImage . decode
                           $ bytes
@@ -45,7 +63,7 @@ fromImageWithDecoder decode filePath = do
         | j <- [0..(h - 1)], i <- [0..(w - 1)]
         ]
 
-  t <- newTexture2D SRGB8A8 sz maxBound
+  t <- newTexture2D (bool RGBA8 SRGB8A8 gamma) sz maxBound
   writeTexture2D t 0 0 sz pixels
   generateTexture2DMipmap t
   return t
@@ -70,7 +88,7 @@ fromNineSlicePng :: (ContextHandler ctx, MonadIO m)
   => FilePath
   -> (Point V2 Int, Point V2 Int)
   -> ContextT ctx os m (NineSlice os)
-fromNineSlicePng = fromNineSliceImageWithDecoder decodePng
+fromNineSlicePng file = fromNineSliceImageWithDecoder decodePng file True
 
 -- Given two points which represent the boundaries of the nine slices of the
 -- sprite texture, create a nine slice sprite.
@@ -79,9 +97,10 @@ fromNineSlicePng = fromNineSliceImageWithDecoder decodePng
 fromNineSliceImageWithDecoder :: (ContextHandler ctx, MonadIO m)
   => (ByteString -> Either String DynamicImage)
   -> FilePath
+  -> GammaCorrected
   -> (Point V2 Int, Point V2 Int)
   -> ContextT ctx os m (NineSlice os)
-fromNineSliceImageWithDecoder decode filePath centre = do
+fromNineSliceImageWithDecoder decode filePath gamma centre = do
   bytes <- liftIO . BS.readFile $ filePath
   let (p0, p1) = centre
       P (V2 x0 y0) = p0
@@ -98,20 +117,21 @@ fromNineSliceImageWithDecoder decode filePath centre = do
         (P (V2  0 y1), P (V2 (x0 - 1) (h  - 1))) -- Bottom left
         (P (V2 x0 y1), P (V2 (x1 - 1) (h  - 1))) -- Bottom
         (P (V2 x1 y1), P (V2 (w  - 1) (h  - 1))) -- Bottom right
-  textures <- mapM (fromImageSlice' image) sliceBounds
+  textures <- mapM (fromImageSlice' image gamma) sliceBounds
   return . NineSlice textures centre $ sz
 
 fromImageSlice' :: (ContextHandler ctx, MonadIO m)
   => Image PixelRGBA8
+  -> GammaCorrected
   -> (Point V2 Int, Point V2 Int)
   -> ContextT ctx os m (Texture2D os (Format RGBAFloat))
-fromImageSlice' image (p0@(P (V2 x0 y0)), p1@(P (V2 x1 y1))) = do
+fromImageSlice' image gamma (p0@(P (V2 x0 y0)), p1@(P (V2 x1 y1))) = do
   let sz = unP . (+1) . subtract p0 $ p1
       pixels = [
             pixelToV4 . pixelAt image i $ j
           | j <- [y0..y1], i <- [x0..x1]
           ]
-  t <- newTexture2D SRGB8A8 sz maxBound
+  t <- newTexture2D (bool RGBA8 SRGB8A8 gamma) sz maxBound
   writeTexture2D t 0 0 sz pixels
   generateTexture2DMipmap t
   return t
