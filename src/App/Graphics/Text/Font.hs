@@ -62,7 +62,7 @@ loadFont = do
   Atlas{..} <- liftIO . fmap (either error id)
     . decodeAtlasFromFile $ metadataFilePath
   -- Load the glyphs into the glyph texture
-  texture <- fromLinearPng glyphsFilePath
+  texture <- fromPng' RGB 1 glyphsFilePath
   let vs = fmap (makeGlyphs atlasMeta) variants
       AtlasMeta{..} = atlasMeta
   return $ Font texture size distanceRange vs

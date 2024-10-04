@@ -1,9 +1,11 @@
 module App.Graphics.Texture (
+  ColourSpace(..),
+
   fromJpeg,
-  fromLinearJpeg,
+  fromJpeg',
 
   fromPng,
-  fromLinearPng,
+  fromPng',
 
   NineSlice(..),
   fromNineSlicePng,
@@ -15,7 +17,6 @@ import Codec.Picture.Jpg
 import Codec.Picture.Png
 import Codec.Picture.Types
 import Control.Monad.IO.Class
-import Data.Bool
 import Data.ByteString
 import qualified Data.Vector.Fixed as V
 import Data.Vector.Fixed.Boxed
@@ -24,35 +25,40 @@ import qualified Data.ByteString as BS
 import Graphics.GPipe hiding (Image)
 import Linear.Affine
 
-type GammaCorrected = Bool
+data ColourSpace = RGB | SRGB
+ deriving (Eq)
 
 fromJpeg :: (ContextHandler ctx, MonadIO m)
   => FilePath
   -> ContextT ctx os m (Texture2D os (Format RGBAFloat))
-fromJpeg file = fromImageWithDecoder decodeJpeg file True
+fromJpeg = fromImageWithDecoder decodeJpeg SRGB maxBound
 
-fromLinearJpeg :: (ContextHandler ctx, MonadIO m)
-  => FilePath
+fromJpeg' :: (ContextHandler ctx, MonadIO m)
+  => ColourSpace
+  -> MaxLevels
+  -> FilePath
   -> ContextT ctx os m (Texture2D os (Format RGBAFloat))
-fromLinearJpeg file = fromImageWithDecoder decodeJpeg file False
-
+fromJpeg' = fromImageWithDecoder decodeJpeg
 
 fromPng :: (ContextHandler ctx, MonadIO m)
   => FilePath
   -> ContextT ctx os m (Texture2D os (Format RGBAFloat))
-fromPng file = fromImageWithDecoder decodePng file True
+fromPng = fromImageWithDecoder decodePng SRGB maxBound
 
-fromLinearPng :: (ContextHandler ctx, MonadIO m)
-  => FilePath
+fromPng' :: (ContextHandler ctx, MonadIO m)
+  => ColourSpace
+  -> MaxLevels
+  -> FilePath
   -> ContextT ctx os m (Texture2D os (Format RGBAFloat))
-fromLinearPng file = fromImageWithDecoder decodePng file False
+fromPng' = fromImageWithDecoder decodePng
 
 fromImageWithDecoder :: (ContextHandler ctx, MonadIO m)
   => (ByteString -> Either String DynamicImage)
+  -> ColourSpace
+  -> MaxLevels
   -> FilePath
-  -> GammaCorrected
   -> ContextT ctx os m (Texture2D os (Format RGBAFloat))
-fromImageWithDecoder decode filePath gamma = do
+fromImageWithDecoder decode space maxLevels filePath = do
   bytes <- liftIO . BS.readFile $ filePath
   let image@Image{..} = either error rgba8ImagefromDynamicImage . decode
                           $ bytes
@@ -63,7 +69,9 @@ fromImageWithDecoder decode filePath gamma = do
         | j <- [0..(h - 1)], i <- [0..(w - 1)]
         ]
 
-  t <- newTexture2D (bool RGBA8 SRGB8A8 gamma) sz maxBound
+  let fmt = if space == RGB then RGBA8 else SRGB8A8
+
+  t <- newTexture2D fmt sz maxLevels
   writeTexture2D t 0 0 sz pixels
   generateTexture2DMipmap t
   return t
@@ -88,7 +96,7 @@ fromNineSlicePng :: (ContextHandler ctx, MonadIO m)
   => FilePath
   -> (Point V2 Int, Point V2 Int)
   -> ContextT ctx os m (NineSlice os)
-fromNineSlicePng file = fromNineSliceImageWithDecoder decodePng file True
+fromNineSlicePng = fromNineSliceImageWithDecoder decodePng
 
 -- Given two points which represent the boundaries of the nine slices of the
 -- sprite texture, create a nine slice sprite.
@@ -97,10 +105,9 @@ fromNineSlicePng file = fromNineSliceImageWithDecoder decodePng file True
 fromNineSliceImageWithDecoder :: (ContextHandler ctx, MonadIO m)
   => (ByteString -> Either String DynamicImage)
   -> FilePath
-  -> GammaCorrected
   -> (Point V2 Int, Point V2 Int)
   -> ContextT ctx os m (NineSlice os)
-fromNineSliceImageWithDecoder decode filePath gamma centre = do
+fromNineSliceImageWithDecoder decode filePath centre = do
   bytes <- liftIO . BS.readFile $ filePath
   let (p0, p1) = centre
       P (V2 x0 y0) = p0
@@ -117,21 +124,20 @@ fromNineSliceImageWithDecoder decode filePath gamma centre = do
         (P (V2  0 y1), P (V2 (x0 - 1) (h  - 1))) -- Bottom left
         (P (V2 x0 y1), P (V2 (x1 - 1) (h  - 1))) -- Bottom
         (P (V2 x1 y1), P (V2 (w  - 1) (h  - 1))) -- Bottom right
-  textures <- mapM (fromImageSlice' image gamma) sliceBounds
+  textures <- mapM (fromImageSlice' image) sliceBounds
   return . NineSlice textures centre $ sz
 
 fromImageSlice' :: (ContextHandler ctx, MonadIO m)
   => Image PixelRGBA8
-  -> GammaCorrected
   -> (Point V2 Int, Point V2 Int)
   -> ContextT ctx os m (Texture2D os (Format RGBAFloat))
-fromImageSlice' image gamma (p0@(P (V2 x0 y0)), p1@(P (V2 x1 y1))) = do
+fromImageSlice' image (p0@(P (V2 x0 y0)), p1@(P (V2 x1 y1))) = do
   let sz = unP . (+1) . subtract p0 $ p1
       pixels = [
             pixelToV4 . pixelAt image i $ j
           | j <- [y0..y1], i <- [x0..x1]
           ]
-  t <- newTexture2D (bool RGBA8 SRGB8A8 gamma) sz maxBound
+  t <- newTexture2D SRGB8A8 sz maxBound
   writeTexture2D t 0 0 sz pixels
   generateTexture2DMipmap t
   return t

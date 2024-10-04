@@ -12,6 +12,7 @@ module App.Graphics.Text (
 ) where
 
 import Control.Arrow
+import Control.Lens
 import Control.Monad.Exception
 import Control.Monad.IO.Class
 import Data.Char
