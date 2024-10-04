@@ -94,7 +94,7 @@ initialise name = do
           configWidth = windowWidth'
         }
 
-  window <- newWindow (WindowFormatColorDepth RGBA8 Depth32) windowConfig
+  window <- newWindow (WindowFormatColorDepth SRGB8A8 Depth32) windowConfig
 
   renderScene <- Scene.createRenderer window windowSize
 

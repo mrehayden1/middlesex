@@ -45,7 +45,7 @@ fromImageWithDecoder decode filePath = do
         | j <- [0..(h - 1)], i <- [0..(w - 1)]
         ]
 
-  t <- newTexture2D RGBA8 sz maxBound
+  t <- newTexture2D SRGB8A8 sz maxBound
   writeTexture2D t 0 0 sz pixels
   generateTexture2DMipmap t
   return t
@@ -111,7 +111,7 @@ fromImageSlice' image (p0@(P (V2 x0 y0)), p1@(P (V2 x1 y1))) = do
             pixelToV4 . pixelAt image i $ j
           | j <- [y0..y1], i <- [x0..x1]
           ]
-  t <- newTexture2D RGBA8 sz maxBound
+  t <- newTexture2D SRGB8A8 sz maxBound
   writeTexture2D t 0 0 sz pixels
   generateTexture2DMipmap t
   return t
