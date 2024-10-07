@@ -77,7 +77,6 @@ executable middlesex
     , containers
     , dependent-sum
     , exception-transformers
-    , fixed-vector
     , hsnoise
     , lens
     , linear

@@ -5,9 +5,14 @@ module App.Graphics.Text.Font (
   Advance,
   GlyphVertex,
 
-  TypefaceI,
-  typefaceMain,
-  typefaceDebug
+  TypefaceIx,
+  typefaceIxLabel,
+  typefaceIxBody,
+  typefaceIxHeading,
+  typefaceIxDebug,
+
+  Typeface(..),
+  Metrics(..)
 ) where
 
 
@@ -26,11 +31,14 @@ metadataFilePath = "assets/fonts/atlas.json"
 glyphsFilePath :: FilePath
 glyphsFilePath = "assets/fonts/glyphs.png"
 
-type TypefaceI = Int
+type TypefaceIx = Int
 
-typefaceMain, typefaceDebug :: TypefaceI
-typefaceMain  = 0
-typefaceDebug = 1
+typefaceIxLabel, typefaceIxBody, typefaceIxHeading, typefaceIxDebug :: TypefaceIx
+
+typefaceIxLabel   = 0
+typefaceIxBody    = 1
+typefaceIxHeading = 1
+typefaceIxDebug   = 2
 
 -- An MSDF font, which has one or more typefaces.
 --
@@ -45,8 +53,13 @@ data Font os = Font {
   fontSdfUnitRange :: Float,
   -- Glyph geometry and the advance (the distance to move the cursor to draw
   -- the next character).
-  fontTypefaces :: Vector (Glyphs os)
+  fontTypefaces :: Vector (Typeface os)
 }
+
+data Typeface os = Typeface {
+    typefaceGlyphs :: Glyphs os,
+    typefaceMetrics :: Metrics
+  }
 
 type Advance = Float
 
@@ -63,13 +76,14 @@ loadFont = do
     . decodeAtlasFromFile $ metadataFilePath
   -- Load the glyphs into the glyph texture
   texture <- fromPng' RGB 1 glyphsFilePath
-  let vs = fmap (makeGlyphs atlasMeta) variants
+  let faces = fmap (makeTypeface atlasMeta) variants
       AtlasMeta{..} = atlasMeta
-  return $ Font texture size distanceRange vs
+  return $ Font texture size distanceRange faces
 
-makeGlyphs :: AtlasMeta -> Variant -> Glyphs os
-makeGlyphs meta Variant{..} =
-  fmap (makeGlyph meta) . unGlyphMap $ glyphs
+makeTypeface :: AtlasMeta -> Variant -> Typeface os
+makeTypeface meta Variant{..} =
+  let gs = fmap (makeGlyph meta) . unGlyphMap $ glyphs
+  in Typeface gs metrics
 
 -- Creates glpyh geometry relative to a cursor at the origin and returns the
 -- advance of the cursor for the next character.
@@ -82,9 +96,9 @@ makeGlyph AtlasMeta{..} Glyph{..} =
   makeQuad pBounds aBounds =
     -- x, y - the glyph's quad geometry in ems
     let x0 = left pBounds
-        y0 = bottom pBounds
         x1 = right pBounds
-        y1 = top pBounds
+        y0 = top pBounds
+        y1 = bottom pBounds
 
         w = fromIntegral width
         h = fromIntegral height
@@ -94,13 +108,13 @@ makeGlyph AtlasMeta{..} Glyph{..} =
         u1 = right aBounds / w
 
         V2 v0 v1 = case yOrigin of
-          YTop    -> V2 (    bottom aBounds) (    top aBounds) ^/ h
-          YBottom -> V2 (h - bottom aBounds) (h - top aBounds) ^/ h
+          YTop    -> V2 (    top aBounds) (    bottom aBounds) ^/ h
+          YBottom -> V2 (h - top aBounds) (h - bottom aBounds) ^/ h
 
     in [ (V2 x0 y0, V2 u0 v0),
+         (V2 x1 y1, V2 u1 v1),
          (V2 x1 y0, V2 u1 v0),
-         (V2 x1 y1, V2 u1 v1),
-         (V2 x1 y1, V2 u1 v1),
+         (V2 x0 y0, V2 u0 v0),
          (V2 x0 y1, V2 u0 v1),
-         (V2 x0 y0, V2 u0 v0)
+         (V2 x1 y1, V2 u1 v1)
        ]

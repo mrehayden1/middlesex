@@ -100,6 +100,10 @@ initialise name = do
 
   renderUi <- UI.createRenderer window windowSize
 
+  font <- loadFont
+
+  let button = UIButton . createUIText font typefaceIxLabel 20 (V4 (248/255) (235/255) (222/255) 1)
+
   let render' scene = do
         -- Clear the colour and depth buffers
         render $ clearWindowColor window 0
@@ -108,6 +112,13 @@ initialise name = do
         renderScene scene
         -- Clear depth buffer and render UI
         render $ clearWindowDepth window 0
-        renderUi . UI . UICard . UIButton $ "Start"
+        renderUi
+          . UI
+          . UICard
+          . UILayoutColumn $ [
+              button "Start",
+              button "Options",
+              button "Exit"
+            ]
 
   return (window, windowSize, render')

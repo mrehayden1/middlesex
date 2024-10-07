@@ -8,6 +8,7 @@ module App.Graphics.Texture (
   fromPng',
 
   NineSlice(..),
+  nineSliceBorderSize,
   fromNineSlicePng,
 
   makeDefaultAlbedoTexture
@@ -17,11 +18,9 @@ import Codec.Picture.Jpg
 import Codec.Picture.Png
 import Codec.Picture.Types
 import Control.Monad.IO.Class
-import Data.ByteString
-import qualified Data.Vector.Fixed as V
-import Data.Vector.Fixed.Boxed
-import Data.Word
+import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import Data.Word
 import Graphics.GPipe hiding (Image)
 import Linear.Affine
 
@@ -63,15 +62,19 @@ fromImageWithDecoder decode space maxLevels filePath = do
   let image@Image{..} = either error rgba8ImagefromDynamicImage . decode
                           $ bytes
       sz@(V2 w h)     = V2 imageWidth imageHeight
-
+      -- Load the pixels into the texture top to bottom and left to right so
+      -- that the UV-cordinates match the convention for pixel cordinates.
       pixels = [
           pixelToV4 . pixelAt image i $ j
         | j <- [0..(h - 1)], i <- [0..(w - 1)]
         ]
 
-  let fmt = if space == RGB then RGBA8 else SRGB8A8
+  let pixelFormat =
+        if space == RGB
+          then RGBA8
+          else SRGB8A8
 
-  t <- newTexture2D fmt sz maxLevels
+  t <- newTexture2D pixelFormat sz maxLevels
   writeTexture2D t 0 0 sz pixels
   generateTexture2DMipmap t
   return t
@@ -87,10 +90,18 @@ rgba8ImagefromDynamicImage dynamicImage =
                           ++ " 24-bit true color + 8-bit transparent image."
 
 data NineSlice os = NineSlice {
-    nineSlices :: Vec 9 (Texture2D os (Format RGBAFloat)),
     nineSliceBoundaries :: (Point V2 Int, Point V2 Int),
-    nineSliceSize :: V2 Int
+    nineSliceSize :: V2 Int,
+    nineSliceTexture :: Texture2D os (Format RGBAFloat)
   }
+
+nineSliceBorderSize :: NineSlice os -> V2 Float
+nineSliceBorderSize NineSlice{..} =
+  -- Border dimensions
+  let V2 leftW  topH    = unP . fst $ nineSliceBoundaries
+      V2 rightW bottomH = nineSliceSize - (unP . snd $ nineSliceBoundaries)
+
+  in fromIntegral <$> V2 (leftW + rightW) (topH + bottomH)
 
 fromNineSlicePng :: (ContextHandler ctx, MonadIO m)
   => FilePath
@@ -107,12 +118,14 @@ fromNineSliceImageWithDecoder :: (ContextHandler ctx, MonadIO m)
   -> FilePath
   -> (Point V2 Int, Point V2 Int)
   -> ContextT ctx os m (NineSlice os)
-fromNineSliceImageWithDecoder decode filePath centre = do
+fromNineSliceImageWithDecoder decode filePath boundaries = do
+  {-
   bytes <- liftIO . BS.readFile $ filePath
-  let (p0, p1) = centre
+  let image@Image{..} = either error rgba8ImagefromDynamicImage . decode
+        $ bytes
+  let (p0, p1) = boundaries
       P (V2 x0 y0) = p0
       P (V2 x1 y1) = p1
-      image@Image{..} = either error rgba8ImagefromDynamicImage . decode $ bytes
       sz@(V2 w h)     = V2 imageWidth imageHeight
       sliceBounds = V.mkN [sliceBounds]
         (P (V2  0  0), P (V2 (x0 - 1) (y0 - 1))) -- Top right
@@ -125,8 +138,12 @@ fromNineSliceImageWithDecoder decode filePath centre = do
         (P (V2 x0 y1), P (V2 (x1 - 1) (h  - 1))) -- Bottom
         (P (V2 x1 y1), P (V2 (w  - 1) (h  - 1))) -- Bottom right
   textures <- mapM (fromImageSlice' image) sliceBounds
-  return . NineSlice textures centre $ sz
+  -}
+  texture <- fromImageWithDecoder decode SRGB maxBound filePath
+  let sz = head . texture2DSizes $ texture
+  return . NineSlice boundaries sz $ texture
 
+{-
 fromImageSlice' :: (ContextHandler ctx, MonadIO m)
   => Image PixelRGBA8
   -> (Point V2 Int, Point V2 Int)
@@ -141,7 +158,7 @@ fromImageSlice' image (p0@(P (V2 x0 y0)), p1@(P (V2 x1 y1))) = do
   writeTexture2D t 0 0 sz pixels
   generateTexture2DMipmap t
   return t
-
+-}
 
 -- A 1 pixel x 1 pixel white texture for use in material shaders which require
 -- an albedo texture.
