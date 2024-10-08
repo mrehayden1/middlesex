@@ -139,7 +139,8 @@ fromNineSliceImageWithDecoder decode filePath boundaries = do
         (P (V2 x1 y1), P (V2 (w  - 1) (h  - 1))) -- Bottom right
   textures <- mapM (fromImageSlice' image) sliceBounds
   -}
-  texture <- fromImageWithDecoder decode SRGB maxBound filePath
+  -- Use up to 4 levels of mipmaps since we'll never likely render below 80dpi
+  texture <- fromImageWithDecoder decode SRGB 4 filePath
   let sz = head . texture2DSizes $ texture
   return . NineSlice boundaries sz $ texture
 
