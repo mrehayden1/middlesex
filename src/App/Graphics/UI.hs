@@ -334,10 +334,10 @@ renderNineSlice (P orig) (V2 innerW innerH) NineSlice{..} = do
     -> Writer ([Vertex], Sum Int) ()
   makeQuad scale' (V2 ox oy) w h (V2 tx0 ty0) (V2 tx1 ty1) = do
     -- Screen space width, height and origin
-    let w'  = roundFloat $ w  * scale'
-        h'  = roundFloat $ h  * scale'
-        ox' = roundFloat $ ox * scale'
-        oy' = roundFloat $ oy * scale'
+    let w'  = w  * scale'
+        h'  = h  * scale'
+        ox' = ox * scale'
+        oy' = oy * scale'
 
     -- Texture co-ordinates
     -- Note that we don't sample from the very edges of the texture but from the
@@ -360,14 +360,14 @@ renderNineSlice (P orig) (V2 innerW innerH) NineSlice{..} = do
         u1  = (tx0' + ((sw' / w') * (w' - 0.5))) / tw'
         v1  = (ty0' + ((sh' / h') * (h' - 0.5))) / th'
 
-    let vertTopL = (V2  ox'        oy'      , V2 u0 v0)
-        vertTopR = (V2 (ox' + w')  oy'      , V2 u1 v0)
-        vertBotL = (V2  ox'       (oy' + h'), V2 u0 v1)
-        vertBotR = (V2 (ox' + w') (oy' + h'), V2 u1 v1)
+    let topL = (roundFloat <$> V2  ox'        oy'      , V2 u0 v0)
+        topR = (roundFloat <$> V2 (ox' + w')  oy'      , V2 u1 v0)
+        botL = (roundFloat <$> V2  ox'       (oy' + h'), V2 u0 v1)
+        botR = (roundFloat <$> V2 (ox' + w') (oy' + h'), V2 u1 v1)
 
     let vertices = [
-            vertTopR, vertTopL, vertBotL,
-            vertTopR, vertBotL, vertBotR
+            topR, topL, botL,
+            topR, botL, botR
           ]
 
     tell (vertices, Sum 6)
