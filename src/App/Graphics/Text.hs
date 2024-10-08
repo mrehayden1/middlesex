@@ -10,7 +10,7 @@ module App.Graphics.Text (
   Text(textWidth),
   textHeight,
 
-  createUIText,
+  uiText,
 
   TextRenderer,
   initialise
@@ -32,7 +32,7 @@ import Text.Printf
 import App.Graphics.Text.Font as F
 import App.Graphics.Window
 import App.Math
-import App.Math.Matrix
+import qualified App.Math.Matrix as Matrix
 
 
 type Shader' os = CompiledShader os (ShaderEnv os)
@@ -49,6 +49,7 @@ type BVertex = (B2 Float, B2 Float)
 
 data Uniforms = Uniforms {
     baseColour :: V4 Float,
+    scale :: Float,
     -- Distance field range in screen pixels
     screenPixelRange :: Float,
     textOrigin :: Origin
@@ -56,12 +57,14 @@ data Uniforms = Uniforms {
 
 data UniformsB = UniformsB {
     baseColourB :: B4 Float,
+    scaleB :: B Float,
     screenPixelRangeB :: B Float,
     textOriginB :: B2 Float
   }
 
 data UniformsS x = UniformsS {
     baseColourS :: V4 (S x Float),
+    scaleS :: S x Float,
     screenPixelRangeS :: S x Float,
     textOriginS :: V2 (S x Float)
   }
@@ -70,10 +73,12 @@ instance BufferFormat UniformsB where
   type HostFormat UniformsB = Uniforms
   toBuffer = proc ~(Uniforms{..}) -> do
                baseColour' <- toBuffer -< baseColour
+               scale' <- toBuffer -< scale
                screenPixelRange' <- toBuffer -< screenPixelRange
                textOrigin' <- toBuffer -< unP textOrigin
                returnA -< UniformsB {
                               baseColourB = baseColour',
+                              scaleB = scale',
                               screenPixelRangeB = screenPixelRange',
                               textOriginB = textOrigin'
                             }
@@ -82,15 +87,17 @@ instance UniformInput UniformsB where
   type UniformFormat UniformsB x = UniformsS x
   toUniform = proc ~(UniformsB{..}) -> do
                 baseColour' <- toUniform -< baseColourB
-                textOrigin' <- toUniform -< textOriginB
+                scale' <- toUniform -< scaleB
                 screenPixelRange' <- toUniform -< screenPixelRangeB
+                textOrigin' <- toUniform -< textOriginB
                 returnA -< UniformsS {
                                baseColourS = baseColour',
+                               scaleS = scale',
                                screenPixelRangeS = screenPixelRange',
                                textOriginS = textOrigin'
                              }
 
-type TextRenderer ctx os m = Text os -> Origin -> ContextT ctx os m ()
+type TextRenderer ctx os m = Text os -> Origin -> Float -> ContextT ctx os m ()
 
 type Origin = Point V2 Float
 
@@ -130,6 +137,7 @@ createShader window (vw, vh) =
     vertexUniforms <- getUniform ((, 0) . shaderUniforms)
 
     let V2 ox oy = textOriginS vertexUniforms
+        scale = scaleS vertexUniforms
 
 
     fragmentUniforms <- getUniform ((, 0) . shaderUniforms)
@@ -148,7 +156,8 @@ createShader window (vw, vh) =
                               (V4 0 (-1)  0 vh')
                               (V4 0   0   1   0)
                               (V4 0   0   0   1)
-              modelM = translate (V3 ox oy 0)
+              modelM = Matrix.translate (V3 ox oy 0)
+                         !*! Matrix.scale (V3 scale scale 0)
           in (proj !*! modelM !* V4 x y 0 1, uv)
 
     -- Fragment shader
@@ -196,13 +205,13 @@ textHeight Text{..} =
   let face = fontTypefaces textFont ! textFaceIx
   in textSize * (lineHeight . typefaceMetrics $ face)
 
-createUIText :: Font os
+uiText :: Font os
   -> TypefaceIx
   -> PixelSize
   -> TextColour
   -> String
   -> Text os
-createUIText font@Font{..} faceIx pixelSize colour str =
+uiText font@Font{..} faceIx pixelSize colour str =
   let -- We transform the glyph geometry to y-down with the origin at the top
       -- left of the line box.
       -- Since this is UI text we round verices to the nearest pixel
@@ -243,13 +252,14 @@ createTextRenderer :: (ContextHandler ctx, MonadIO m, MonadException m)
   -> Buffer os (Uniform UniformsB)
   -> Shader' os
   -> TextRenderer ctx os m
-createTextRenderer vertexBuffer uniformsBuffer shader Text{..} origin' = do
+createTextRenderer vertexBuffer uniformsBuffer shader Text{..} origin' scale' = do
   writeBuffer vertexBuffer 0 textVertices
 
   let uniforms = Uniforms {
           baseColour = textColour,
-          screenPixelRange = (textSize / fontSize textFont)
+          screenPixelRange = ((textSize * scale') / fontSize textFont)
                                * fontSdfUnitRange textFont,
+          scale = scale',
           textOrigin = origin'
         }
 

@@ -102,7 +102,8 @@ initialise name = do
 
   font <- loadFont
 
-  let button = UIButton . createUIText font typefaceIxLabel 20 (V4 (248/255) (235/255) (222/255) 1)
+  let button = UIButton
+        . uiText font typefaceIxLabel 160 (V4 (248/255) (235/255) (222/255) 1)
 
   let render' scene = do
         -- Clear the colour and depth buffers

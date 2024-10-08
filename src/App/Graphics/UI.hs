@@ -9,7 +9,7 @@ module App.Graphics.UI (
   UI(..),
   UIElem(..),
 
-  createUIText,
+  uiText,
 
   createRenderer
 ) where
@@ -212,11 +212,10 @@ cardInnerSize = elemSize
 
 buttonInnerSize :: Monad m => Text os -> Renderer ctx os m (V2 Float)
 buttonInnerSize t = do
-  scale <- asks rendererScale
   -- Buttons only scale horizontally, i.e. they have a fixed height
   (P (V2 _ height)) <- asks (uncurry subtract . nineSliceBoundaries
                                . rendererButtonMaterial)
-  return $ V2 (textWidth t / scale) (fromIntegral height)
+  return $ V2 (textWidth t) (fromIntegral height)
 
 renderElem :: forall ctx os m. (ContextHandler ctx, MonadIO m, MonadException m)
   => Point V2 Float
@@ -236,11 +235,11 @@ renderElem (P orig) (UIButton t) = do
   -- Offset
   let V2 leftW topH = unP . fmap fromIntegral . fst . nineSliceBoundaries
                         $ nineSlice
-      textHeight'   = textHeight t / scale'
+      textHeight'   = textHeight t
       offsetV       = topH + (innerH - textHeight') / 2
 
   -- Render children
-  liftContextT . renderText t . P $ (orig + V2 leftW offsetV) ^* scale'
+  liftContextT . renderText t (P (orig + V2 leftW offsetV) ^* scale') $ scale'
 
 renderElem (P orig) (UICard el) = do
   nineSlice <- asks rendererCardMaterial
