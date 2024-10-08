@@ -20,6 +20,7 @@ import Control.Monad.Exception
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Maybe
 import Control.Monad.Reader
+import Control.Monad.Writer
 import qualified Data.List as L
 import Data.Maybe
 import Graphics.GPipe
@@ -81,6 +82,7 @@ data ShaderEnv os = ShaderEnv {
     shaderPrimitives :: PrimitiveArray Triangles BVertex
   }
 
+type Vertex  = (V2 Float, V2 Float)
 type BVertex = (B2 Float, B2 Float)
 
 
@@ -263,12 +265,15 @@ renderElem (P orig) (UILayoutColumn es) = do
     return $ orig' + V2 0 height
 
 
-renderNineSlice :: (ContextHandler ctx, MonadIO m, MonadException m)
+renderNineSlice :: forall ctx os m. (ContextHandler ctx, MonadIO m, MonadException m)
   => Point V2 Float
   -> V2 Float
   -> NineSlice os
   -> Renderer ctx os m ()
 renderNineSlice (P orig) (V2 innerW innerH) NineSlice{..} = do
+  vertexBuffer <- asks rendererVertexBuffer
+  shader <- asks rendererShader
+
   scale' <- asks rendererScale
 
   -- Sprite border slice dimensions
@@ -276,98 +281,99 @@ renderNineSlice (P orig) (V2 innerW innerH) NineSlice{..} = do
       V2 rightW botH = fmap fromIntegral
                          $ nineSliceSize - (unP . snd $ nineSliceBoundaries)
 
-  let textureSz@(V2 w h) = nineSliceSize
+  let (V2 w h) = nineSliceSize
       (P (V2 x0 y0), P (V2 x1 y1)) = nineSliceBoundaries
 
-  -- Top left border
-  renderQuad nineSliceTexture scale' orig leftW topH (V2 0 0) (V2 x0 y0) textureSz
-  -- Top border
-  let topOff = orig + V2 leftW 0
-  renderQuad nineSliceTexture scale' topOff innerW topH (V2 x0 0) (V2 x1 y0) textureSz
-  -- Top right border
-  let topRightOff = orig + V2 (leftW + innerW) 0
-  renderQuad nineSliceTexture scale' topRightOff rightW topH (V2 x1 0) (V2 w y0) textureSz
-  -- Left border
-  let leftOff = orig + V2 0 topH
-  renderQuad nineSliceTexture scale' leftOff leftW innerH (V2 0 y0) (V2 x0 y1) textureSz
-  -- Centre
-  let centreOff = orig + V2 leftW topH
-  renderQuad nineSliceTexture scale' centreOff innerW innerH (V2 x0 y0) (V2 x1 y1) textureSz
-  -- Right border
-  let rightOff = orig + V2 (leftW + innerW) topH
-  renderQuad nineSliceTexture scale' rightOff rightW innerH (V2 x1 y0) (V2 w y1) textureSz
-  -- Bottom left border
-  let botLeftOff = orig + V2 0 (topH + innerH)
-  renderQuad nineSliceTexture scale' botLeftOff leftW botH (V2 0 y1) (V2 x0 h) textureSz
-  -- Bottom border
-  let botOff = orig + V2 leftW (topH + innerH)
-  renderQuad nineSliceTexture scale' botOff innerW botH (V2 x0 y1) (V2 x1 h) textureSz
-  -- Bottom right border
-  let botRightOff = orig + V2 (leftW + innerW) (topH + innerH)
-  renderQuad nineSliceTexture scale' botRightOff rightW botH (V2 x1 y1) (V2 w h) textureSz
-
-renderQuad :: (ContextHandler ctx, MonadIO m, MonadException m)
-  => Texture2D os (Format RGBAFloat)
-  -> Float
-  -> V2 Float
-  -> Float
-  -> Float
-  -> V2 Int
-  -> V2 Int
-  -> V2 Int
-  -> Renderer ctx os m ()
-renderQuad texture scale' (V2 ox oy) w h (V2 tx0 ty0) (V2 tx1 ty1) (V2 tw th) = do
-  vertexBuffer <- asks rendererVertexBuffer
-  shader <- asks rendererShader
-
-  -- Screen space width, height and origin
-  let w'  = roundFloat $ w  * scale'
-      h'  = roundFloat $ h  * scale'
-      ox' = roundFloat $ ox * scale'
-      oy' = roundFloat $ oy * scale'
-
-  -- Texture co-ordinates
-  -- Note that we don't sample from the very edges of the texture but from the
-  -- middle of each pixel where they map onto the sprite.
-  -- Texture size
-  let tw'  = fromIntegral tw
-  let th'  = fromIntegral th
-  -- Texture pixel co-ordinates
-  let tx0' = fromIntegral tx0
-      tx1' = fromIntegral tx1
-      ty0' = fromIntegral ty0
-      ty1' = fromIntegral ty1
-      -- Slice width and height
-  let sw'  = tx1' - tx0'
-      sh'  = ty1' - ty0'
-
-  let u0  = (tx0' + ((sw' / w') *       0.5))  / tw'
-      v0  = (ty0' + ((sh' / h') *       0.5))  / th'
-      u1  = (tx0' + ((sw' / w') * (w' - 0.5))) / tw'
-      v1  = (ty0' + ((sh' / h') * (h' - 0.5))) / th'
-
-  let vertTopL = (V2  ox'        oy'      , V2 u0 v0)
-      vertTopR = (V2 (ox' + w')  oy'      , V2 u1 v0)
-      vertBotL = (V2  ox'       (oy' + h'), V2 u0 v1)
-      vertBotR = (V2 (ox' + w') (oy' + h'), V2 u1 v1)
-
-  let vertices = [
-          vertTopR, vertTopL, vertBotL,
-          vertTopR, vertBotL, vertBotR
-        ]
+  let (vertices, numVertices) = execWriter $ do
+        -- Top left border
+        makeQuad scale' orig leftW topH (V2 0 0) (V2 x0 y0)
+        -- Top border
+        let topOff = orig + V2 leftW 0
+        makeQuad scale' topOff innerW topH (V2 x0 0) (V2 x1 y0)
+        -- Top right border
+        let topRightOff = orig + V2 (leftW + innerW) 0
+        makeQuad scale' topRightOff rightW topH (V2 x1 0) (V2 w y0)
+        -- Left border
+        let leftOff = orig + V2 0 topH
+        makeQuad scale' leftOff leftW innerH (V2 0 y0) (V2 x0 y1)
+        -- Centre
+        let centreOff = orig + V2 leftW topH
+        makeQuad scale' centreOff innerW innerH (V2 x0 y0) (V2 x1 y1)
+        -- Right border
+        let rightOff = orig + V2 (leftW + innerW) topH
+        makeQuad scale' rightOff rightW innerH (V2 x1 y0) (V2 w y1)
+        -- Bottom left border
+        let botLeftOff = orig + V2 0 (topH + innerH)
+        makeQuad scale' botLeftOff leftW botH (V2 0 y1) (V2 x0 h)
+        -- Bottom border
+        let botOff = orig + V2 leftW (topH + innerH)
+        makeQuad scale' botOff innerW botH (V2 x0 y1) (V2 x1 h)
+        -- Bottom right border
+        let botRightOff = orig + V2 (leftW + innerW) (topH + innerH)
+        makeQuad scale' botRightOff rightW botH (V2 x1 y1) (V2 w h)
 
   liftContextT $ do
     writeBuffer vertexBuffer 0 vertices
 
     render $ do
-      vertexArray <- fmap (takeVertices . length $ vertices)
+      vertexArray <- fmap (takeVertices . getSum $ numVertices)
                        . newVertexArray $ vertexBuffer
       let primitiveArray = toPrimitiveArray TriangleList vertexArray
           env = ShaderEnv {
-                    shaderTexture = texture,
+                    shaderTexture = nineSliceTexture,
                     shaderPrimitives = primitiveArray
                   }
       shader env
+ where
+  makeQuad :: Float
+    -> V2 Float
+    -> Float
+    -> Float
+    -> V2 Int
+    -> V2 Int
+    -> Writer ([Vertex], Sum Int) ()
+  makeQuad scale' (V2 ox oy) w h (V2 tx0 ty0) (V2 tx1 ty1) = do
+    -- Screen space width, height and origin
+    let w'  = roundFloat $ w  * scale'
+        h'  = roundFloat $ h  * scale'
+        ox' = roundFloat $ ox * scale'
+        oy' = roundFloat $ oy * scale'
+
+    -- Texture co-ordinates
+    -- Note that we don't sample from the very edges of the texture but from the
+    -- middle of each pixel where they map onto the sprite.
+    -- Texture size
+    let (V2 tw th) = nineSliceSize
+        tw'  = fromIntegral tw
+        th'  = fromIntegral th
+    -- Texture pixel co-ordinates
+    let tx0' = fromIntegral tx0
+        tx1' = fromIntegral tx1
+        ty0' = fromIntegral ty0
+        ty1' = fromIntegral ty1
+        -- Slice width and height
+    let sw'  = tx1' - tx0'
+        sh'  = ty1' - ty0'
+
+    let u0  = (tx0' + ((sw' / w') *       0.5))  / tw'
+        v0  = (ty0' + ((sh' / h') *       0.5))  / th'
+        u1  = (tx0' + ((sw' / w') * (w' - 0.5))) / tw'
+        v1  = (ty0' + ((sh' / h') * (h' - 0.5))) / th'
+
+    let vertTopL = (V2  ox'        oy'      , V2 u0 v0)
+        vertTopR = (V2 (ox' + w')  oy'      , V2 u1 v0)
+        vertBotL = (V2  ox'       (oy' + h'), V2 u0 v1)
+        vertBotR = (V2 (ox' + w') (oy' + h'), V2 u1 v1)
+
+    let vertices = [
+            vertTopR, vertTopL, vertBotL,
+            vertTopR, vertBotL, vertBotR
+          ]
+
+    tell (vertices, Sum 6)
+
+    return ()
+
 
 getDpi :: MaybeT IO Float
 getDpi = do
