@@ -55,18 +55,23 @@ textureDpi = 640
 zMax :: Num a => a
 zMax = 1000
 
-cardNineSliceTexturePath :: FilePath
-cardNineSliceTexturePath = "assets/textures/ui/card-nine-slice.png"
+bannerNineSliceTexurePath :: FilePath
+bannerNineSliceTexurePath = "assets/textures/ui/banner-nine-slice.png"
 
 buttonNineSliceTexurePath :: FilePath
 buttonNineSliceTexurePath = "assets/textures/ui/button-nine-slice.png"
 
+cardNineSliceTexturePath :: FilePath
+cardNineSliceTexturePath = "assets/textures/ui/card-nine-slice.png"
+
 newtype UI os = UI (UIElem os)
 
 data UIElem os =
-    UICard (UIElem os)
+    UIBanner (Text os)
   | UIButton (Text os)
-  | UILayoutColumn [UIElem os]
+  | UICard (UIElem os)
+  | UIColumn [UIElem os]
+  | UISpacer Int
 {-
   | UILabel String
   | UIButton String
@@ -92,6 +97,7 @@ runRenderer :: RenderEnv ctx os m -> Renderer ctx os m a -> ContextT ctx os m a
 runRenderer = flip runReaderT
 
 data RenderEnv ctx os m = RenderEnv {
+    rendererBannerMaterial :: NineSlice os,
     rendererButtonMaterial :: NineSlice os,
     rendererCardMaterial :: NineSlice os,
     rendererScale :: Float,
@@ -114,10 +120,12 @@ createRenderer window windowSize@(vw, vh) = do
   dpi <- liftIO . fmap (fromMaybe defaultDpi) . runMaybeT $ getDpi
 
   -- UI materials
-  cardMaterial <- fromNineSlicePng cardNineSliceTexturePath
-                    (P (V2 192 192), P (V2 212 212))
+  bannerMaterial <- fromNineSlicePng bannerNineSliceTexurePath
+                      (P (V2 616 0), P (V2 830 888))
   buttonMaterial <- fromNineSlicePng buttonNineSliceTexurePath
                       (P (V2 252 32), P (V2 700 416))
+  cardMaterial <- fromNineSlicePng cardNineSliceTexturePath
+                    (P (V2 192 192), P (V2 212 212))
 
   -- Shader environment
   --  Pre-allocated buffers
@@ -130,6 +138,7 @@ createRenderer window windowSize@(vw, vh) = do
   renderText <- Text.initialise window windowSize
 
   let renderEnv = RenderEnv {
+          rendererBannerMaterial = bannerMaterial,
           rendererButtonMaterial = buttonMaterial,
           rendererCardMaterial = cardMaterial,
           rendererScale = scale',
@@ -193,6 +202,10 @@ renderUi (UI el) = do
   renderElem (P $ V2 x y) el
 
 elemSize :: Monad m => UIElem os -> Renderer ctx os m (V2 Float)
+elemSize (UIBanner t) = do
+  outerSz <- asks (nineSliceBorderSize . rendererBannerMaterial)
+  innerSz <- bannerInnerSize t
+  return $ innerSz + outerSz
 elemSize (UIButton t) = do
   outerSz <- asks (nineSliceBorderSize . rendererButtonMaterial)
   innerSz <- buttonInnerSize t
@@ -201,14 +214,22 @@ elemSize (UICard e) = do
   outerSz <- asks (nineSliceBorderSize . rendererCardMaterial)
   innerSz <- cardInnerSize e
   return $ innerSz + outerSz
-elemSize (UILayoutColumn es) = do
+elemSize (UIColumn es) = do
   sizes <- mapM elemSize es
   let width = L.foldl' (flip $ max . (^. _x)) 0 sizes
       height = L.foldl' (flip $ (+) . (^. _y)) 0 sizes
   return . V2 width $ height
+elemSize (UISpacer i)  = return . V2 0 . fromIntegral $ i
 
-cardInnerSize :: Monad m => UIElem os -> Renderer ctx os m (V2 Float)
-cardInnerSize = elemSize
+bannerInnerSize :: Monad m => Text os -> Renderer ctx os m (V2 Float)
+bannerInnerSize t = do
+  -- Buttons only scale horizontally, i.e. they have a fixed height
+  (P (V2 _ height)) <- asks (uncurry subtract . nineSliceBoundaries
+                               . rendererBannerMaterial)
+  -- Horizontal padding
+  let width = textWidth t + 320
+
+  return . V2 width . fromIntegral $ height
 
 buttonInnerSize :: Monad m => Text os -> Renderer ctx os m (V2 Float)
 buttonInnerSize t = do
@@ -217,10 +238,35 @@ buttonInnerSize t = do
                                . rendererButtonMaterial)
   return $ V2 (textWidth t) (fromIntegral height)
 
+cardInnerSize :: Monad m => UIElem os -> Renderer ctx os m (V2 Float)
+cardInnerSize = elemSize
+
 renderElem :: forall ctx os m. (ContextHandler ctx, MonadIO m, MonadException m)
   => Point V2 Float
   -> UIElem os
   -> Renderer ctx os m ()
+
+renderElem (P orig) (UIBanner t) = do
+  renderText <- asks rendererTextRenderer
+
+  nineSlice <- asks rendererBannerMaterial
+  scale' <- asks rendererScale
+
+  -- Render banner background
+  inner@(V2 innerW innerH) <- bannerInnerSize t
+  renderNineSlice (P orig) inner nineSlice
+
+  -- Render text
+  -- Offset
+  let V2 leftW topH = unP . fmap fromIntegral . fst . nineSliceBoundaries
+                        $ nineSlice
+      textHeight'   = textHeight t
+      offsetV       = topH + (innerH - textHeight') / 2
+
+      textWidth'    = textWidth t
+      offsetH       = leftW + (innerW - textWidth') / 2
+
+  liftContextT . renderText t (P (orig + V2 offsetH offsetV) ^* scale') $ scale'
 
 renderElem (P orig) (UIButton t) = do
   renderText <- asks rendererTextRenderer
@@ -232,13 +278,13 @@ renderElem (P orig) (UIButton t) = do
   inner@(V2 _ innerH) <- buttonInnerSize t
   renderNineSlice (P orig) inner nineSlice
 
+  -- Render text
   -- Offset
   let V2 leftW topH = unP . fmap fromIntegral . fst . nineSliceBoundaries
                         $ nineSlice
       textHeight'   = textHeight t
       offsetV       = topH + (innerH - textHeight') / 2
 
-  -- Render children
   liftContextT . renderText t (P (orig + V2 leftW offsetV) ^* scale') $ scale'
 
 renderElem (P orig) (UICard el) = do
@@ -255,14 +301,18 @@ renderElem (P orig) (UICard el) = do
   -- Render children
   renderElem (P $ orig + V2 leftW topH) el
 
-renderElem (P orig) (UILayoutColumn es) = do
-  foldM_ accum orig es
+renderElem (P orig) e@(UIColumn es) = do
+  V2 columnWidth _ <- elemSize e
+  foldM_ (accum columnWidth) orig es
  where
-  accum orig' elem' = do
-    renderElem (P orig') elem'
-    V2 _ height <- elemSize elem'
+  accum colWidth orig'@(V2 ox oy) elem' = do
+    V2 width height <- elemSize elem'
+    let xOffset = (colWidth - width) / 2
+    renderElem (P (V2 (ox + xOffset) oy)) elem'
     return $ orig' + V2 0 height
 
+renderElem _ (UISpacer _) = do
+  return ()
 
 renderNineSlice :: forall ctx os m. (ContextHandler ctx, MonadIO m, MonadException m)
   => Point V2 Float

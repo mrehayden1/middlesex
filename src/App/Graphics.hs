@@ -103,7 +103,10 @@ initialise name = do
   font <- loadFont
 
   let button = UIButton
-        . uiText font typefaceIxLabel 160 (V4 (248/255) (235/255) (222/255) 1)
+        . uiText font typefaceIxLabel 128 (V4 (248/255) (235/255) (222/255) 1)
+
+      banner = UIBanner
+        . uiText font typefaceIxHeading 320 (V4 0 0 0 1)
 
   let render' scene = do
         -- Clear the colour and depth buffers
@@ -115,11 +118,15 @@ initialise name = do
         render $ clearWindowDepth window 0
         renderUi
           . UI
-          . UICard
-          . UILayoutColumn $ [
-              button "Start",
-              button "Options",
-              button "Exit"
+          . UIColumn $ [
+              banner "Acts of Enclosure",
+              UISpacer 320,
+              UICard
+                . UIColumn $ [
+                    button "Start",
+                    button "Options",
+                    button "Exit"
+                  ]
             ]
 
   return (window, windowSize, render')
