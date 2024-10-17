@@ -3,9 +3,9 @@ module Main (
 ) where
 
 import Control.Concurrent
-import Control.Monad.Identity
-import Control.Monad.IO.Class
+import Control.Monad.Trans
 import Control.Monad.Reader
+import Control.Monad.Identity
 import Data.Dependent.Sum
 import Data.Foldable
 import Data.Maybe
@@ -17,8 +17,10 @@ import Reflex.Host.Class
 import System.Exit
 import System.Mem
 
-import App.Env
-import App.Game
+import App
+import App.Class
+import App.UI
+import App.Graphics as Graphics
 
 name :: String
 name = "Acts of Enclosure"
@@ -38,29 +40,60 @@ main = do
 
   eventsChan <- newChan
 
-  -- NB: This first dollar is to keep the type checker happy, otherwise the
-  -- Rank-2 type parameter `os` escapes.
+  -- NB: The dollar keeps the type checker happy, otherwise the Rank-2 type
+  -- parameter in runContextT causes a type error.
   runSpiderHost $ runContextT defaultHandleConfig $ do
-    (env, renderScene, windowShouldClose', tickTrigger) <-
-      flip runTriggerEventT eventsChan . initialise $ name
+    (window, windowSize, render, elementIdTexture) <-
+      Graphics.initialise name
 
     -- Create post build event.
-    (ePostBuild, postBuildTriggerRef) <- lift newEventWithTriggerRef
+    (ePostBuild, postBuildTriggerRef) <- newEventWithTriggerRef
 
-    -- Create the network.
-    (Output{..}, FireCommand fire) <- lift . hostPerformEventT
-      . flip runPostBuildT ePostBuild
-      . flip runTriggerEventT eventsChan
-      . flip runReaderT env
-      $ game
+    rec
+      (eTick, tickTrigger, uiEvents) <-
+        flip runTriggerEventT eventsChan $ do
+          -- Dispatch inputs to the right UI element by sampling the element ID
+          -- map texture at the mouse position / focus.
+          --
+          -- Unhandled inputs are dispatched to the UI events.
+          (eKey, keyTrigger) <- newTriggerEvent
+          _ <- lift . setKeyCallback window . Just $
+                 \k _ ks _ -> keyTrigger (k, ks)
+
+          (eCursorPos, cursorPosTrigger) <- newTriggerEvent
+          _ <- lift . setCursorPosCallback window . Just $
+                 \x y -> cursorPosTrigger . P . V2 (round x) $ round y
+
+          (eMouseButton, mouseButtonTrigger) <- newTriggerEvent
+          _ <- lift . setMouseButtonCallback window . Just $
+                 \b s _ -> mouseButtonTrigger (b, s)
+
+          -- Create a tick event so the host can trigger a tick after each frame
+          -- render.
+          (eTick', tickTrigger') <- newTriggerEvent
+
+          let uiEvents' = UIEvents eCursorPos eKey eMouseButton
+
+          return (eTick', tickTrigger', uiEvents')
+
+      let env = Env eTick windowSize
+
+      -- Create the network.
+      (((eQuit, scene), ui, uiTriggers), FireCommand fire) <-
+          hostPerformEventT
+          . flip runPostBuildT ePostBuild
+          . flip runTriggerEventT eventsChan
+          . flip runReaderT env
+          . runUiBuilderT uiEvents
+          $ game
 
     -- Event handles - for reading current `Event` values, which may or may not
     -- have been produced since the last frame.
-    hQuit <- lift . subscribeEvent $ outputQuit
-    hScene <- lift . subscribeEvent $ outputScene
+    hQuit <- subscribeEvent eQuit
+    --hScene <- subscribeEvent eScene
 
-    -- Exit callback which cleans up and shuts down successfully.
-    let exit = do
+    -- Exit callback, shuts down .
+    let exit = liftIO $ do
           putStrLn "Exiting..."
           exitSuccess
 
@@ -73,26 +106,30 @@ main = do
           tickTrigger deltaT
           writeIORef timeRef now'
 
-    let doRender scene = do
-          renderScene scene
-          -- Call the tick trigger after we render so we know how long the last
-          -- frame took and so there's an event in the chan.
+        doRender scene' = do
+          render scene' ui
           doTick
 
-    -- Processes event outputs. There will be a list of outputs, one for each
-    -- event triggered so we have to process them all accordingly.
+    -- Processes event outputs and finds out if we should shutdown.
+    -- There will be a list of outputs, one for each event triggered in the
+    -- last frame so we have to process them all accordingly.
     let handleOutput outs = do
+          {-
+          mapM_ doRender . listToMaybe . mapMaybe snd $ outs
           -- Any quit event should cause the application to exit.
-          mapM_ (const $ liftIO exit) . mapMaybe fst $ outs
-          -- Render the latest Picture output.
-          mapM_ doRender . listToMaybe . mapMaybe snd . reverse $ outs
+          return . any (isJust . fst) $ outs
+          -}
+          return . any isJust $ outs
 
     -- Reads output event handles and sequences any actions by PerformEvent
     -- methods.
     let readPhase = do
-          quit <- sequence =<< readEvent hQuit
-          scene <- sequence =<< readEvent hScene
-          return (quit, scene)
+          {-
+          q <- sequence =<< readEvent hQuit
+          s <- sequence =<< readEvent hScene
+          return (q, s)
+          -}
+          sequence =<< readEvent hQuit
 
     -- Triggers events created using `TriggerEvent`
     let fireEventTriggerRefs ers rcb = do
@@ -109,11 +146,12 @@ main = do
     out <- case maybePostBuildTrigger of
       -- If nothing is listening, don't do anything.
       Nothing      -> return []
-      Just trigger -> lift $ fire [trigger :=> Identity ()] readPhase
-    handleOutput out
+      Just trigger -> fire [trigger :=> Identity ()] readPhase
 
-    -- Call the tick trigger once so there's an event in the channel and we
-    -- don't block on the first read.
+    -- Handle initial output and shutdown immediately if required
+    handleOutput out >>= flip when exit
+
+    -- Push a tick to the Chan so we don't block indefinitely
     doTick
 
     -- Main loop.
@@ -121,15 +159,14 @@ main = do
       -- Read the event channel written to by `TriggerEvent` process the
       -- subsequent outputs.
       events <- liftIO $ readChan eventsChan
-      outs <- lift . fireEventTriggerRefs events $ readPhase
-      handleOutput outs
+      out' <- fireEventTriggerRefs events readPhase
+      shouldShutdown <- handleOutput out'
 
-      -- Exit if the window close button was pressed.
-      closeRequested <- windowShouldClose'
-      liftIO . when (closeRequested == Just True) $ exit
-
-      -- Run the garbage collector every frame in an attempt to keep the major
-      -- GC latency low.
+      -- Try to keep GC latency low.
       liftIO performMinorGC
 
-      loop
+      doRender =<< sample scene
+
+      if shouldShutdown
+        then exit
+        else loop

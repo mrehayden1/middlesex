@@ -11,6 +11,7 @@ module App.Graphics.UI (
 
   uiText,
 
+  ElemIdTexture,
   createRenderer
 ) where
 
@@ -23,6 +24,7 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import qualified Data.List as L
 import Data.Maybe
+import Data.Word
 import Graphics.GPipe
 import qualified Graphics.UI.GLFW as GLFW
 import Linear.Affine
@@ -37,11 +39,26 @@ import App.Math
 -- Rendering is scaled down from 640dpi to prevent the need for upscaling given
 -- the prevalence of XHDPI (320dpi) consumer devices.
 --
--- Therefore all UI textures must be exported at 640dpi.
+-- This means all UI textures must be exported at 640dpi.
 --
--- Consequently all UI geometry is calculated at 640dpi scale then scaled to
--- the pixel resolution of the display and rounded to the nearest pixel.
---
+-- Consequently all UI is specified at 640dpi then scaled so that the physical
+-- size remains the same at the resolution of the display and also rounded to
+-- the nearest pixel.
+
+
+-- UI Container
+-- Centralises the element on the screen
+-- TODO: Add other anchors, e.g. bottom, top right, etc.
+newtype UI = UI UIElem
+
+data UIElem =
+    UIBanner String
+  | UIButton Word String
+  | UICard UIElem
+  | UIColumn [UIElem]
+  | UIEmpty
+  | UISpacer Word
+
 
 maxVertices :: Int
 maxVertices = 1024
@@ -64,32 +81,25 @@ buttonNineSliceTexurePath = "assets/textures/ui/button-nine-slice.png"
 cardNineSliceTexturePath :: FilePath
 cardNineSliceTexturePath = "assets/textures/ui/card-nine-slice.png"
 
-newtype UI os = UI (UIElem os)
+type ElemId = Word32
 
-data UIElem os =
-    UIBanner (Text os)
-  | UIButton (Text os)
-  | UICard (UIElem os)
-  | UIColumn [UIElem os]
-  | UISpacer Int
-{-
-  | UILabel String
-  | UIButton String
-  | UIColumn [UIElem]
-  | UIRow [UIElem]
--}
+type ElemIdTexture os = Texture2D os (Format RWord)
+
+type ElemIdImage = Image (Format RWord)
 
 
 type Shader' os = CompiledShader os (ShaderEnv os)
 
 data ShaderEnv os = ShaderEnv {
-    shaderTexture :: Texture2D os (Format RGBAFloat),
+    shaderElemIdImage :: ElemIdImage,
+    shaderMaterialTexture :: Texture2D os (Format RGBAFloat),
     shaderPrimitives :: PrimitiveArray Triangles BVertex
   }
 
-type Vertex  = (V2 Float, V2 Float)
-type BVertex = (B2 Float, B2 Float)
 
+--              Position  Texture uv  Element ID
+type Vertex  = (V2 Float, V2 Float  , ElemId)
+type BVertex = (B2 Float, B2 Float  , B ElemId)
 
 type Renderer ctx os m = ReaderT (RenderEnv ctx os m) (ContextT ctx os m)
 
@@ -100,6 +110,7 @@ data RenderEnv ctx os m = RenderEnv {
     rendererBannerMaterial :: NineSlice os,
     rendererButtonMaterial :: NineSlice os,
     rendererCardMaterial :: NineSlice os,
+    rendererElemIdTexture :: ElemIdTexture os,
     rendererScale :: Float,
     rendererShader :: Shader' os,
     rendererTextRenderer :: TextRenderer ctx os m,
@@ -110,14 +121,18 @@ data RenderEnv ctx os m = RenderEnv {
 liftContextT :: ContextT ctx os m a -> Renderer ctx os m a
 liftContextT = ReaderT . const
 
-
+-- Create a UI renderer and element ID texture.
+--
+-- The renderer renders the UI to the back buffer and all the interactable
+-- element IDs to the texture.
 createRenderer :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Window' os
   -> WindowSize
-  -> ContextT ctx os m (UI os -> ContextT ctx os m ())
+  -> ContextT ctx os m (UI -> ContextT ctx os m (), ElemIdTexture os)
 createRenderer window windowSize@(vw, vh) = do
-  -- Calculate screen DPI
+  -- Calculate screen DPI and UI scale
   dpi <- liftIO . fmap (fromMaybe defaultDpi) . runMaybeT $ getDpi
+  let scale' = dpi / textureDpi
 
   -- UI materials
   bannerMaterial <- fromNineSlicePng bannerNineSliceTexurePath
@@ -127,20 +142,22 @@ createRenderer window windowSize@(vw, vh) = do
   cardMaterial <- fromNineSlicePng cardNineSliceTexturePath
                     (P (V2 192 192), P (V2 212 212))
 
-  -- Shader environment
-  --  Pre-allocated buffers
+  -- Pre-allocated buffers
   vertexBuffer :: Buffer os BVertex <- newBuffer maxVertices
-  shader <- createShader window windowSize
-
-  let scale' = dpi / textureDpi
 
   -- SDF font sub-renderer
   renderText <- Text.initialise window windowSize
+
+  -- Element ID texture - single image, for element picking
+  elemIdTexture :: ElemIdTexture os <- newTexture2D R32UI (V2 vw vh) 1
+
+  shader <- createShader window windowSize
 
   let renderEnv = RenderEnv {
           rendererBannerMaterial = bannerMaterial,
           rendererButtonMaterial = buttonMaterial,
           rendererCardMaterial = cardMaterial,
+          rendererElemIdTexture = elemIdTexture,
           rendererScale = scale',
           rendererShader = shader,
           rendererTextRenderer = renderText,
@@ -149,9 +166,16 @@ createRenderer window windowSize@(vw, vh) = do
                                     (fromIntegral vh / scale')
         }
 
-  return $ \ui -> do
-    runRenderer renderEnv $ do
-      renderUi ui
+  let doRender ui = do
+        -- Clear the element ID texture
+        render $ do
+          elemIdImage <- getTexture2DImage elemIdTexture 0
+          clearImageColor elemIdImage 0
+
+        runRenderer renderEnv $ do
+          renderUi ui
+
+  return (doRender, elemIdTexture)
 
 createShader :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Window' os
@@ -162,28 +186,36 @@ createShader window (vw, vh) =
     -- Textures
     let sampleFilter = SamplerFilter Linear Linear Linear Nothing
     sampler <- newSampler2D $ \s ->
-      (shaderTexture s, sampleFilter, (pure Repeat, undefined))
+      (shaderMaterialTexture s, sampleFilter, (pure Repeat, undefined))
 
     -- Vertex shader
     primitiveStream <- toPrimitiveStream shaderPrimitives
-    let primitiveStream' = flip fmap primitiveStream $ \(V2 x y, uv) ->
+    let primitiveStream' = flip fmap primitiveStream $ \(V2 x y, uv, i) ->
           let vw' = fromIntegral vw
               vh' = fromIntegral vh
-          in (ortho 0 vw' 0 vh' 0 zMax !* V4 x (vh' - y) 0 1, uv)
+              pos = ortho 0 vw' 0 vh' 0 zMax !* V4 x (vh' - y) 0 1
+          in (pos, (uv, i))
 
     -- Fragment shader
     let shadeFragment = sample2D sampler SampleAuto Nothing Nothing
 
-    fragmentStream <- fmap (fmap shadeFragment)
-      . flip rasterize primitiveStream'
+    fragmentStream <- flip rasterize primitiveStream'
       . const $
           (Front,
            ViewPort (V2 0 0) (V2 vw vh),
            DepthRange 0 1
           )
 
-    flip drawWindowColor fragmentStream $
+    let colourFragments = fmap (shadeFragment . fst) fragmentStream
+        elemIdFragments = fmap snd fragmentStream
+
+    -- Draw depth and colour to the window back buffer
+    flip drawWindowColor colourFragments $
       const (window, ContextColorOption blending (pure True))
+
+    -- Draw element ID to the element ID texture
+    draw (const NoBlending) elemIdFragments
+      . drawColor $ \s -> (shaderElemIdImage s, True, False)
  where
   blending =
     BlendRgbAlpha
@@ -192,7 +224,7 @@ createShader window (vw, vh) =
       0
 
 renderUi :: forall ctx os m. (ContextHandler ctx, MonadIO m, MonadException m)
-  => UI os
+  => UI
   -> Renderer ctx os m ()
 renderUi (UI el) = do
   V2 vw vh <- asks rendererViewportSize
@@ -201,14 +233,15 @@ renderUi (UI el) = do
       y = (vh - inH) / 2
   renderElem (P $ V2 x y) el
 
-elemSize :: Monad m => UIElem os -> Renderer ctx os m (V2 Float)
-elemSize (UIBanner t) = do
+elemSize :: Monad m => UIElem -> Renderer ctx os m (V2 Float)
+elemSize (UIBanner _) = do
   outerSz <- asks (nineSliceBorderSize . rendererBannerMaterial)
-  innerSz <- bannerInnerSize t
+  --innerSz <- bannerInnerSize t
+  let innerSz = 0
   return $ innerSz + outerSz
-elemSize (UIButton t) = do
+elemSize (UIButton _ _) = do
   outerSz <- asks (nineSliceBorderSize . rendererButtonMaterial)
-  innerSz <- buttonInnerSize t
+  innerSz <- buttonInnerSize undefined
   return $ innerSz + outerSz
 elemSize (UICard e) = do
   outerSz <- asks (nineSliceBorderSize . rendererCardMaterial)
@@ -219,6 +252,7 @@ elemSize (UIColumn es) = do
   let width = L.foldl' (flip $ max . (^. _x)) 0 sizes
       height = L.foldl' (flip $ (+) . (^. _y)) 0 sizes
   return . V2 width $ height
+elemSize UIEmpty       = return 0
 elemSize (UISpacer i)  = return . V2 0 . fromIntegral $ i
 
 bannerInnerSize :: Monad m => Text os -> Renderer ctx os m (V2 Float)
@@ -236,14 +270,15 @@ buttonInnerSize t = do
   -- Buttons only scale horizontally, i.e. they have a fixed height
   (P (V2 _ height)) <- asks (uncurry subtract . nineSliceBoundaries
                                . rendererButtonMaterial)
-  return $ V2 (textWidth t) (fromIntegral height)
+  --return $ V2 (textWidth t) (fromIntegral height)
+  return $ V2 0 (fromIntegral height)
 
-cardInnerSize :: Monad m => UIElem os -> Renderer ctx os m (V2 Float)
+cardInnerSize :: Monad m => UIElem -> Renderer ctx os m (V2 Float)
 cardInnerSize = elemSize
 
 renderElem :: forall ctx os m. (ContextHandler ctx, MonadIO m, MonadException m)
   => Point V2 Float
-  -> UIElem os
+  -> UIElem
   -> Renderer ctx os m ()
 
 renderElem (P orig) (UIBanner t) = do
@@ -253,46 +288,49 @@ renderElem (P orig) (UIBanner t) = do
   scale' <- asks rendererScale
 
   -- Render banner background
-  inner@(V2 innerW innerH) <- bannerInnerSize t
-  renderNineSlice (P orig) inner nineSlice
+  --inner@(V2 innerW innerH) <- bannerInnerSize t
+  let inner@(V2 innerW innerH) = 0
+  renderNineSlice Nothing (P orig) inner nineSlice
 
   -- Render text
   -- Offset
   let V2 leftW topH = unP . fmap fromIntegral . fst . nineSliceBoundaries
                         $ nineSlice
-      textHeight'   = textHeight t
+      textHeight'   = 0 --textHeight t
       offsetV       = topH + (innerH - textHeight') / 2
 
-      textWidth'    = textWidth t
+      textWidth'    = 0 --textWidth t
       offsetH       = leftW + (innerW - textWidth') / 2
 
-  liftContextT . renderText t (P (orig + V2 offsetH offsetV) ^* scale') $ scale'
+  --liftContextT . renderText t (P (orig + V2 offsetH offsetV) ^* scale') $ scale'
+  return ()
 
-renderElem (P orig) (UIButton t) = do
+renderElem (P orig) (UIButton i t) = do
   renderText <- asks rendererTextRenderer
 
   scale' <- asks rendererScale
   nineSlice <- asks rendererButtonMaterial
 
   -- Render button background
-  inner@(V2 _ innerH) <- buttonInnerSize t
-  renderNineSlice (P orig) inner nineSlice
+  inner@(V2 _ innerH) <- buttonInnerSize undefined
+  renderNineSlice (Just . fromIntegral $ i) (P orig) inner nineSlice
 
   -- Render text
   -- Offset
   let V2 leftW topH = unP . fmap fromIntegral . fst . nineSliceBoundaries
                         $ nineSlice
-      textHeight'   = textHeight t
+      textHeight'   = 0 --textHeight t
       offsetV       = topH + (innerH - textHeight') / 2
 
-  liftContextT . renderText t (P (orig + V2 leftW offsetV) ^* scale') $ scale'
+  --liftContextT . renderText t (P (orig + V2 leftW offsetV) ^* scale') $ scale'
+  return ()
 
 renderElem (P orig) (UICard el) = do
   nineSlice <- asks rendererCardMaterial
 
   -- Render card background
   inner <- cardInnerSize el
-  renderNineSlice (P orig) inner nineSlice
+  renderNineSlice Nothing (P orig) inner nineSlice
 
   -- Offset
   let V2 leftW topH = unP . fmap fromIntegral . fst . nineSliceBoundaries
@@ -311,17 +349,20 @@ renderElem (P orig) e@(UIColumn es) = do
     renderElem (P (V2 (ox + xOffset) oy)) elem'
     return $ orig' + V2 0 height
 
-renderElem _ (UISpacer _) = do
-  return ()
+renderElem _ UIEmpty      = return ()
+
+renderElem _ (UISpacer _) = return ()
 
 renderNineSlice :: forall ctx os m. (ContextHandler ctx, MonadIO m, MonadException m)
-  => Point V2 Float
+  => Maybe ElemId
+  -> Point V2 Float
   -> V2 Float
   -> NineSlice os
   -> Renderer ctx os m ()
-renderNineSlice (P orig) (V2 innerW innerH) NineSlice{..} = do
+renderNineSlice mElemId (P orig) (V2 innerW innerH) NineSlice{..} = do
   vertexBuffer <- asks rendererVertexBuffer
   shader <- asks rendererShader
+  elemIdTexture <- asks rendererElemIdTexture
 
   scale' <- asks rendererScale
 
@@ -333,33 +374,36 @@ renderNineSlice (P orig) (V2 innerW innerH) NineSlice{..} = do
   let (V2 w h) = nineSliceSize
       (P (V2 x0 y0), P (V2 x1 y1)) = nineSliceBoundaries
 
+  -- Element ID, defaults to zero
+  let elemId = fromMaybe 0 mElemId
+
   let (vertices, numVertices) = execWriter $ do
         -- Top left border
-        makeQuad scale' orig leftW topH (V2 0 0) (V2 x0 y0)
+        makeQuad elemId scale' orig leftW topH (V2 0 0) (V2 x0 y0)
         -- Top border
         let topOff = orig + V2 leftW 0
-        makeQuad scale' topOff innerW topH (V2 x0 0) (V2 x1 y0)
+        makeQuad elemId scale' topOff innerW topH (V2 x0 0) (V2 x1 y0)
         -- Top right border
         let topRightOff = orig + V2 (leftW + innerW) 0
-        makeQuad scale' topRightOff rightW topH (V2 x1 0) (V2 w y0)
+        makeQuad elemId scale' topRightOff rightW topH (V2 x1 0) (V2 w y0)
         -- Left border
         let leftOff = orig + V2 0 topH
-        makeQuad scale' leftOff leftW innerH (V2 0 y0) (V2 x0 y1)
+        makeQuad elemId scale' leftOff leftW innerH (V2 0 y0) (V2 x0 y1)
         -- Centre
         let centreOff = orig + V2 leftW topH
-        makeQuad scale' centreOff innerW innerH (V2 x0 y0) (V2 x1 y1)
+        makeQuad elemId scale' centreOff innerW innerH (V2 x0 y0) (V2 x1 y1)
         -- Right border
         let rightOff = orig + V2 (leftW + innerW) topH
-        makeQuad scale' rightOff rightW innerH (V2 x1 y0) (V2 w y1)
+        makeQuad elemId scale' rightOff rightW innerH (V2 x1 y0) (V2 w y1)
         -- Bottom left border
         let botLeftOff = orig + V2 0 (topH + innerH)
-        makeQuad scale' botLeftOff leftW botH (V2 0 y1) (V2 x0 h)
+        makeQuad elemId scale' botLeftOff leftW botH (V2 0 y1) (V2 x0 h)
         -- Bottom border
         let botOff = orig + V2 leftW (topH + innerH)
-        makeQuad scale' botOff innerW botH (V2 x0 y1) (V2 x1 h)
+        makeQuad elemId scale' botOff innerW botH (V2 x0 y1) (V2 x1 h)
         -- Bottom right border
         let botRightOff = orig + V2 (leftW + innerW) (topH + innerH)
-        makeQuad scale' botRightOff rightW botH (V2 x1 y1) (V2 w h)
+        makeQuad elemId scale' botRightOff rightW botH (V2 x1 y1) (V2 w h)
 
   liftContextT $ do
     writeBuffer vertexBuffer 0 vertices
@@ -367,21 +411,26 @@ renderNineSlice (P orig) (V2 innerW innerH) NineSlice{..} = do
     render $ do
       vertexArray <- fmap (takeVertices . getSum $ numVertices)
                        . newVertexArray $ vertexBuffer
+
+      elemIdImage <- getTexture2DImage elemIdTexture 0
+
       let primitiveArray = toPrimitiveArray TriangleList vertexArray
           env = ShaderEnv {
-                    shaderTexture = nineSliceTexture,
+                    shaderElemIdImage = elemIdImage,
+                    shaderMaterialTexture = nineSliceTexture,
                     shaderPrimitives = primitiveArray
                   }
       shader env
  where
-  makeQuad :: Float
+  makeQuad :: ElemId
+    -> Float
     -> V2 Float
     -> Float
     -> Float
     -> V2 Int
     -> V2 Int
     -> Writer ([Vertex], Sum Int) ()
-  makeQuad scale' (V2 ox oy) w h (V2 tx0 ty0) (V2 tx1 ty1) = do
+  makeQuad elemId scale' (V2 ox oy) w h (V2 tx0 ty0) (V2 tx1 ty1) = do
     -- Screen space width, height and origin
     let w'  = w  * scale'
         h'  = h  * scale'
@@ -389,8 +438,8 @@ renderNineSlice (P orig) (V2 innerW innerH) NineSlice{..} = do
         oy' = oy * scale'
 
     -- Texture co-ordinates
-    -- Note that we don't sample from the very edges of the texture but from the
-    -- middle of each pixel where they map onto the sprite.
+    -- Note that we don't sample from the very edges of the texture but from
+    -- the middle of each pixel where they map onto the sprite.
     -- Texture size
     let (V2 tw th) = nineSliceSize
         tw'  = fromIntegral tw
@@ -409,10 +458,10 @@ renderNineSlice (P orig) (V2 innerW innerH) NineSlice{..} = do
         u1  = (tx0' + ((sw' / w') * (w' - 0.5))) / tw'
         v1  = (ty0' + ((sh' / h') * (h' - 0.5))) / th'
 
-    let topL = (roundFloat <$> V2  ox'        oy'      , V2 u0 v0)
-        topR = (roundFloat <$> V2 (ox' + w')  oy'      , V2 u1 v0)
-        botL = (roundFloat <$> V2  ox'       (oy' + h'), V2 u0 v1)
-        botR = (roundFloat <$> V2 (ox' + w') (oy' + h'), V2 u1 v1)
+    let topL = (roundFloat <$> V2  ox'        oy'      , V2 u0 v0, elemId)
+        topR = (roundFloat <$> V2 (ox' + w')  oy'      , V2 u1 v0, elemId)
+        botL = (roundFloat <$> V2  ox'       (oy' + h'), V2 u0 v1, elemId)
+        botR = (roundFloat <$> V2 (ox' + w') (oy' + h'), V2 u1 v1, elemId)
 
     let vertices = [
             topR, topL, botL,

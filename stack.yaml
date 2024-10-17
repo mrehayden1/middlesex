@@ -46,10 +46,11 @@ extra-deps:
 - patch-0.0.8.2
 - primitive-0.7.4.0
 - reflex-0.9.3.0
-- git: https://github.com/tobbebex/GPipe-Core.git
-  commit: 4f512f1ea6e6c32bbefaae1be38a68508337b1fa
-  subdirs:
-  - GPipe-Core
+#- git: https://github.com/tobbebex/GPipe-Core.git
+#  commit: 4f512f1ea6e6c32bbefaae1be38a68508337b1fa
+#  subdirs:
+#  - GPipe-Core
+- ../GPipe-Core/GPipe-Core
 - GPipe-GLFW-1.4.1.4
 
 # Override default flag values for project packages and extra-deps

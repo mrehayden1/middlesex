@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.37.0.
+-- This file has been generated from package.yaml by hpack version 0.36.0.
 --
 -- see: https://github.com/sol/hpack
 
@@ -26,8 +26,8 @@ source-repository head
 executable middlesex
   main-is: Main.hs
   other-modules:
-      App.Env
-      App.Game
+      App
+      App.Class
       App.Game.Board
       App.Graphics
       App.Graphics.Camera
@@ -44,6 +44,7 @@ executable middlesex
       App.Graphics.Window
       App.Math
       App.Math.Matrix
+      App.UI
       Paths_middlesex
   hs-source-dirs:
       src
@@ -54,12 +55,16 @@ executable middlesex
       DeriveGeneric
       FlexibleContexts
       FlexibleInstances
+      FunctionalDependencies
       GeneralizedNewtypeDeriving
       LambdaCase
       MultiParamTypeClasses
       OverloadedStrings
+      RankNTypes
       RecordWildCards
+      RecursiveDo
       ScopedTypeVariables
+      StandaloneDeriving
       TupleSections
       TypeApplications
       TypeFamilies

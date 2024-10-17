@@ -1,10 +1,9 @@
-module App.Game (
-  Output(..),
-
+module App (
   game
 ) where
 
 import Control.Lens
+import Control.Monad
 import Control.Monad.Random
 import Control.Monad.Reader
 import Data.Bool
@@ -12,17 +11,21 @@ import Linear
 import Linear.Affine
 import Reflex
 
-import App.Env
+import App.Class
 import App.Game.Board
+import App.Graphics
+import App.UI
 
-data Output t = Output {
-    outputQuit :: Event t (),
-    outputScene :: Event t Scene
-  }
-
-game :: forall os t m. App os t m => m (Output t)
+game :: App os t m => m (Event t (), Behavior t Scene)
 game = do
   Env{..} <- ask
+
+  UIEvents{..} <- unhandledEvents
+
+  exitE <- card $ do
+    _ <- button "Start"
+    _ <- button "Options"
+    button "Exit"
 
   -- Map seed
   --let seed = 13011987
@@ -80,16 +83,17 @@ game = do
         . flip ffilter eMouseButton
         $ \(b, s) -> b == MouseButton'1 && s == MouseButtonState'Pressed
 
-  tileIndexClick <- holdDyn Nothing
+  tileIndexSelection <- holdDyn Nothing
     . fmap (Just . fromAxial . roundAxial . toAxial . (\(V2 x y) -> (x, y))
               . subtract (tileMapTranslation (boardWidth, boardHeight) (0, 0))
               . unP)
     $ mapClickE
 
-  return $ Output {
-      outputQuit = void . ffilter ((== Key'Escape) . fst) $ eKey,
-      outputScene = updated $ Scene board <$> camera <*> tileIndexClick
-    }
+  let eQuit = void . ffilter ((== Key'Escape) . fst) $ eKey
+      scene = current $ Scene board <$> camera <*> tileIndexSelection
+
+  return (eQuit, scene)
+
  where
   speed :: Float
   speed = 2.5

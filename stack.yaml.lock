@@ -47,19 +47,6 @@ packages:
   original:
     hackage: reflex-0.9.3.0
 - completed:
-    commit: 4f512f1ea6e6c32bbefaae1be38a68508337b1fa
-    git: https://github.com/tobbebex/GPipe-Core.git
-    name: GPipe
-    pantry-tree:
-      sha256: 8d5af0772bc954e32b8333ccc0b0de2afd5684d6a821e93ae12d8812841313b1
-      size: 2452
-    subdir: GPipe-Core
-    version: 2.2.5
-  original:
-    commit: 4f512f1ea6e6c32bbefaae1be38a68508337b1fa
-    git: https://github.com/tobbebex/GPipe-Core.git
-    subdir: GPipe-Core
-- completed:
     hackage: GPipe-GLFW-1.4.1.4@sha256:66e56b598856a016129ed05dff056bdf589815eac27ff06355cf7a71e98c19de,1999
     pantry-tree:
       sha256: c10567ca08c21780fcf009aac73318f8770f99790c502a9fe68a748b934c157f
