@@ -59,12 +59,16 @@ default-extensions:
 - DeriveGeneric
 - FlexibleContexts
 - FlexibleInstances
+- FunctionalDependencies
 - GeneralizedNewtypeDeriving
 - LambdaCase
 - MultiParamTypeClasses
 - OverloadedStrings
+- RankNTypes
 - RecordWildCards
+- RecursiveDo
 - ScopedTypeVariables
+- StandaloneDeriving
 - TupleSections
 - TypeApplications
 - TypeFamilies

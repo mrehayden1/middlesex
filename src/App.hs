@@ -1,10 +1,9 @@
-module App.Game (
-  Output(..),
-
+module App (
   game
 ) where
 
 import Control.Lens
+import Control.Monad
 import Control.Monad.Random
 import Control.Monad.Reader
 import Data.Bool
@@ -12,17 +11,21 @@ import Linear
 import Linear.Affine
 import Reflex
 
-import App.Env
+import App.Class
 import App.Game.Board
+import App.Graphics
+import App.UI
 
-data Output t = Output {
-    outputQuit :: Event t (),
-    outputScene :: Event t Scene
-  }
-
-game :: forall os t m. App os t m => m (Output t)
+game :: App os t m => m (Event t (), Event t (), Behavior t Scene)
 game = do
   Env{..} <- ask
+
+  UIEvents{..} <- uiEvents
+
+  eExit <- card $ do
+    _ <- button "Start"
+    _ <- button "Options"
+    button "Exit"
 
   -- Map seed
   --let seed = 13011987
@@ -34,10 +37,10 @@ game = do
   let windowRight  = fst windowSize - 1
       windowBottom = snd windowSize - 1
 
-  keyUp    <- keyHeld Key'Up    eKey
-  keyDown  <- keyHeld Key'Down  eKey
-  keyLeft  <- keyHeld Key'Left  eKey
-  keyRight <- keyHeld Key'Right eKey
+  keyUp    <- keyHeld Key'Up    eUnhandledKey
+  keyDown  <- keyHeld Key'Down  eUnhandledKey
+  keyLeft  <- keyHeld Key'Left  eUnhandledKey
+  keyRight <- keyHeld Key'Right eUnhandledKey
 
   cursorWindowLeft   <- holdDyn False . fmap ((<= 0) . (^. _x))
                           $ eCursorPos
@@ -77,19 +80,21 @@ game = do
 
   let mapClickE = fmap (uncurry (uncurry screenMapCoords windowSize))
         . tag ((,) <$> current camera <*> current cursorPos)
-        . flip ffilter eMouseButton
+        . flip ffilter eUnhandledMouseButton
         $ \(b, s) -> b == MouseButton'1 && s == MouseButtonState'Pressed
 
-  tileIndexClick <- holdDyn Nothing
+  tileIndexSelection <- holdDyn Nothing
     . fmap (Just . fromAxial . roundAxial . toAxial . (\(V2 x y) -> (x, y))
               . subtract (tileMapTranslation (boardWidth, boardHeight) (0, 0))
               . unP)
     $ mapClickE
 
-  return $ Output {
-      outputQuit = void . ffilter ((== Key'Escape) . fst) $ eKey,
-      outputScene = updated $ Scene board <$> camera <*> tileIndexClick
-    }
+  let eEsc = void . ffilter ((== Key'Escape) . fst) $ eUnhandledKey
+
+      scene = current $ Scene board <$> camera <*> tileIndexSelection
+
+  return (leftmost [eExit, eEsc], void eTick, scene)
+
  where
   speed :: Float
   speed = 2.5

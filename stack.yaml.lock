@@ -5,6 +5,13 @@
 
 packages:
 - completed:
+    hackage: GPipe-GLFW-1.4.1.4@sha256:66e56b598856a016129ed05dff056bdf589815eac27ff06355cf7a71e98c19de,1999
+    pantry-tree:
+      sha256: c10567ca08c21780fcf009aac73318f8770f99790c502a9fe68a748b934c157f
+      size: 1018
+  original:
+    hackage: GPipe-GLFW-1.4.1.4
+- completed:
     hackage: commutative-semigroups-0.1.0.2@sha256:3629c249ac5be72e48eac677969f0638e48b9199370b64ffcf6ceeac391ecc6e,1106
     pantry-tree:
       sha256: f817a541d8116bb764fe0240afa3071f6a015b0b3f4ab50482ca75b7a59683a2
@@ -47,25 +54,18 @@ packages:
   original:
     hackage: reflex-0.9.3.0
 - completed:
-    commit: 4f512f1ea6e6c32bbefaae1be38a68508337b1fa
-    git: https://github.com/tobbebex/GPipe-Core.git
+    commit: f0ef4e507219beb8b20cef1c4c0e565fb15679f3
+    git: https://github.com/mrehayden1/GPipe-Core.git
     name: GPipe
     pantry-tree:
-      sha256: 8d5af0772bc954e32b8333ccc0b0de2afd5684d6a821e93ae12d8812841313b1
+      sha256: 8d7932c38783bb4cb5026c83ca4a526372bf8497c4556aa5b8c0c96304b91a10
       size: 2452
     subdir: GPipe-Core
     version: 2.2.5
   original:
-    commit: 4f512f1ea6e6c32bbefaae1be38a68508337b1fa
-    git: https://github.com/tobbebex/GPipe-Core.git
+    commit: f0ef4e507219beb8b20cef1c4c0e565fb15679f3
+    git: https://github.com/mrehayden1/GPipe-Core.git
     subdir: GPipe-Core
-- completed:
-    hackage: GPipe-GLFW-1.4.1.4@sha256:66e56b598856a016129ed05dff056bdf589815eac27ff06355cf7a71e98c19de,1999
-    pantry-tree:
-      sha256: c10567ca08c21780fcf009aac73318f8770f99790c502a9fe68a748b934c157f
-      size: 1018
-  original:
-    hackage: GPipe-GLFW-1.4.1.4
 snapshots:
 - completed:
     sha256: 5a59b2a405b3aba3c00188453be172b85893cab8ebc352b1ef58b0eae5d248a2

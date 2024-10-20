@@ -1,15 +1,23 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
 module App.Graphics (
   module App.Graphics.Camera,
   module App.Graphics.Projection,
 
   module Linear,
+  module Linear.Affine,
 
   Scene(..),
+  UIElem,
 
   initialise,
 
   ContextT,
   runContextT,
+
+  ContextHandler,
+
+  Window',
+  WindowSize,
 
   Handle,
   defaultHandleConfig,
@@ -27,18 +35,25 @@ module App.Graphics (
 
   setMouseButtonCallback,
   MouseButton(..),
-  MouseButtonState(..)
+  MouseButtonState(..),
+
+  readUiElemIdTexture,
+  readUiElemIdTexturePixel
 ) where
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.Trans
 import Control.Monad.Exception
-import Control.Monad.IO.Class
+import Control.Monad.Ref
 import Data.Maybe
 import Graphics.GPipe
 import Graphics.GPipe.Context.GLFW
 import qualified Graphics.UI.GLFW as GLFW
 import Linear
+import Linear.Affine
+import Reflex
+import Reflex.Host.Class
 
 import App.Graphics.Camera
 import App.Graphics.Projection
@@ -66,12 +81,13 @@ windowHeightFallback, windowWidthFallback :: Int
 windowHeightFallback = 1080
 windowWidthFallback = 1920
 
-initialise :: (ctx ~ Handle, MonadIO m, MonadException m)
+initialise :: (ctx ~ Handle, MonadAsyncException m)
   => String
   -> ContextT ctx os m (
          Window' os,
          WindowSize,
-         Scene -> ContextT ctx os m ()
+         Scene -> [UIElem] -> ContextT ctx os m (),
+         UIElemIDTexture os
        )
 initialise name = do
   mMonitor <- liftIO GLFW.getPrimaryMonitor
@@ -98,35 +114,65 @@ initialise name = do
 
   renderScene <- Scene.createRenderer window windowSize
 
-  renderUi <- UI.createRenderer window windowSize
+  (renderUi, elemIdMap) <- UI.createRenderer window windowSize
 
-  font <- loadFont
-
-  let button = UIButton
-        . uiText font typefaceIxLabel 128 (V4 (248/255) (235/255) (222/255) 1)
-
-      banner = UIBanner
-        . uiText font typefaceIxHeading 320 (V4 0 0 0 1)
-
-  let render' scene = do
-        -- Clear the colour and depth buffers
-        render $ clearWindowColor window 0
-        render $ clearWindowDepth window 0
+  let doRender scene ui = do
+        -- Clear the colour and depth back buffers
+        render $ do
+          clearWindowColor window $ V4 0 0 0 1
+          clearWindowDepth window 1
         -- Render scene
         renderScene scene
-        -- Clear depth buffer and render UI
-        render $ clearWindowDepth window 0
-        renderUi
-          . UI
-          . UIColumn $ [
-              banner "Acts of Enclosure",
-              UISpacer 320,
-              UICard
-                . UIColumn $ [
-                    button "Start",
-                    button "Options",
-                    button "Exit"
-                  ]
-            ]
+        -- Clear the depth back buffer and render UI
+        render $ clearWindowDepth window 1
+        renderUi . UI . UIColumn $ ui
 
-  return (window, windowSize, render')
+  return (window, windowSize, doRender, elemIdMap)
+
+{-
+ - Orphan ContextT instances
+ -}
+instance MonadRef m => MonadRef (ContextT ctx os m) where
+  type Ref (ContextT ctx os m) = Ref m
+  {-# INLINABLE newRef #-}
+  newRef = lift . newRef
+  {-# INLINABLE readRef #-}
+  readRef = lift . readRef
+  {-# INLINABLE writeRef #-}
+  writeRef r = lift . writeRef r
+
+instance MonadSubscribeEvent t m
+  => MonadSubscribeEvent t (ContextT ctx os m) where
+    subscribeEvent = lift . subscribeEvent
+
+instance MonadReflexHost t m => MonadReflexHost t (ContextT ctx os m) where
+  type ReadPhase (ContextT ctx os m) = ReadPhase m
+  fireEventsAndRead dm a = lift $ fireEventsAndRead dm a
+  {-# INLINE fireEventsAndRead #-}
+  runHostFrame = lift . runHostFrame
+  {-# INLINE runHostFrame #-}
+
+instance MonadReflexCreateTrigger t m
+  => MonadReflexCreateTrigger t (ContextT handle os m) where
+    newEventWithTrigger = lift . newEventWithTrigger
+    newFanEventWithTrigger initializer = lift
+                                          $ newFanEventWithTrigger initializer
+
+instance TriggerEvent t m => TriggerEvent t (ContextT ctx os m) where
+  {-# INLINABLE newTriggerEvent #-}
+  newTriggerEvent = lift newTriggerEvent
+  {-# INLINABLE newTriggerEventWithOnComplete #-}
+  newTriggerEventWithOnComplete = lift newTriggerEventWithOnComplete
+  newEventWithLazyTriggerWithOnComplete = lift .
+    newEventWithLazyTriggerWithOnComplete
+
+instance MonadSample t m => MonadSample t (ContextT ctx os m) where
+  sample = lift . sample
+
+instance (MonadHold t m) => MonadHold t (ContextT ctx os m) where
+  hold a0 = lift . hold a0
+  holdDyn a0 = lift . holdDyn a0
+  holdIncremental a0 = lift . holdIncremental a0
+  buildDynamic a0 = lift . buildDynamic a0
+  headE = lift . headE
+  now = lift now
