@@ -143,7 +143,8 @@ main = do
           -- Find the hovered element if there is one, 0 in the texture
           -- means nothing to click on
           let (_, windowH) = windowSize
-          elemId <- readUiElemIdTexturePixel uiElemIdTexture curX (windowH - curY)
+          elemId <- readUiElemIdTexturePixel uiElemIdTexture curX
+                      $ windowH - curY - 1
 
           mMouseMoveEvent <- liftIO . readIORef $ mouseMoveEventRef
           case mMouseMoveEvent of
