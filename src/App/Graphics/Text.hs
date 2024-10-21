@@ -7,12 +7,12 @@ module App.Graphics.Text (
   typefaceIxHeading,
   typefaceIxDebug,
 
-  Text(textWidth),
-  textHeight,
+  SDFText(sdfTextWidth),
+  sdfTextHeight,
 
-  uiText,
+  uiSdfText,
 
-  TextRenderer,
+  Renderer,
   initialise
 ) where
 
@@ -97,11 +97,11 @@ instance UniformInput UniformsB where
                                textOriginS = textOrigin'
                              }
 
-type TextRenderer ctx os m = Text os -> Origin -> Float -> ContextT ctx os m ()
+type Renderer ctx os m = SDFText os -> Origin -> Float -> ContextT ctx os m ()
 
 type Origin = Point V2 Float
 
-type TextColour = V4 Float
+type Colour = V4 Float
 
 type PixelSize = Float
 
@@ -112,14 +112,14 @@ maxGlyphVertices = 6 * 1024
 initialise :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Window' os
   -> WindowSize
-  -> ContextT ctx os m (TextRenderer ctx os m)
+  -> ContextT ctx os m (Renderer ctx os m)
 initialise window windowSize = do
   shader <- createShader window windowSize
 
   vertexBuffer :: Buffer os (B2 Float, B2 Float) <- newBuffer maxGlyphVertices
   uniformsBuffer :: Buffer os (Uniform UniformsB) <- newBuffer 1
 
-  return . createTextRenderer vertexBuffer uniformsBuffer $ shader
+  return . createRenderer vertexBuffer uniformsBuffer $ shader
 
 createShader :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Window' os
@@ -189,29 +189,31 @@ createShader window (vw, vh) =
       (BlendingFactors SrcAlpha OneMinusSrcAlpha, BlendingFactors One Zero)
       0
 
-data Text os = Text {
-    textColour   :: TextColour,
-    textFaceIx   :: TypefaceIx,
-    textFont     :: Font os,
+data SDFText os = SDFText {
+    sdfTextColour   :: Colour,
+    sdfTextFaceIx   :: TypefaceIx,
+    sdfTextFont     :: Font os,
     -- Line height in pixels
-    textSize     :: PixelSize,
-    textVertices :: [Vertex],
+    sdfTextSize     :: PixelSize,
+    sdfTextVertices :: [Vertex],
     -- Pixel width of all rendererd glyphs - cached
-    textWidth    :: Float
+    sdfTextWidth    :: Float
   }
 
-textHeight :: Text os -> Float
-textHeight Text{..} =
-  let face = fontTypefaces textFont ! textFaceIx
-  in textSize * (lineHeight . typefaceMetrics $ face)
+sdfTextHeight :: SDFText os -> Float
+sdfTextHeight SDFText{..} =
+  let face = fontTypefaces sdfTextFont ! sdfTextFaceIx
+  in sdfTextSize * (lineHeight . typefaceMetrics $ face)
 
-uiText :: Font os
+-- Text that is meant to be rendered in a UI context.
+-- i.e. Geometry rounded to the nearest pixel, no anisotrophy.
+uiSdfText :: Font os
   -> TypefaceIx
   -> PixelSize
-  -> TextColour
+  -> Colour
   -> String
-  -> Text os
-uiText font@Font{..} faceIx pixelSize colour str =
+  -> SDFText os
+uiSdfText font@Font{..} faceIx pixelSize colour str =
   let -- We transform the glyph geometry to y-down with the origin at the top
       -- left of the line box.
       -- Since this is UI text we round verices to the nearest pixel
@@ -222,13 +224,13 @@ uiText font@Font{..} faceIx pixelSize colour str =
 
       (vertices, cursor) = foldl accumGlyph ([], 0) str
 
-   in Text {
-          textColour   = colour,
-          textFaceIx   = faceIx,
-          textFont     = font,
-          textSize     = pixelSize,
-          textVertices = vertices,
-          textWidth    = cursor * pixelSize
+   in SDFText {
+          sdfTextColour   = colour,
+          sdfTextFaceIx   = faceIx,
+          sdfTextFont     = font,
+          sdfTextSize     = pixelSize,
+          sdfTextVertices = vertices,
+          sdfTextWidth    = cursor * pixelSize
         }
  where
   face   = fontTypefaces ! faceIx
@@ -245,33 +247,34 @@ uiText font@Font{..} faceIx pixelSize colour str =
 
   defaultGlyphErr = error . printf msg $ faceIx
    where
-    msg = "createUIText: Default glyph '?' not found in atlas for typeface %d"
+    msg = "uiSdfText: Default glyph '?' not found in atlas for typeface %d"
 
-createTextRenderer :: (ContextHandler ctx, MonadIO m, MonadException m)
+createRenderer :: (ContextHandler ctx, MonadIO m, MonadException m)
   => Buffer os (B2 Float, B2 Float)
   -> Buffer os (Uniform UniformsB)
   -> Shader' os
-  -> TextRenderer ctx os m
-createTextRenderer vertexBuffer uniformsBuffer shader Text{..} origin' scale' = do
-  writeBuffer vertexBuffer 0 textVertices
+  -> Renderer ctx os m
+createRenderer vertexBuffer uniformsBuffer shader SDFText{..} origin' scale' =
+  do
+    writeBuffer vertexBuffer 0 sdfTextVertices
 
-  let uniforms = Uniforms {
-          baseColour = textColour,
-          screenPixelRange = ((textSize * scale') / fontSize textFont)
-                               * fontSdfUnitRange textFont,
-          scale = scale',
-          textOrigin = origin'
-        }
+    let uniforms = Uniforms {
+            baseColour = sdfTextColour,
+            screenPixelRange = ((sdfTextSize * scale') / fontSize sdfTextFont)
+                                 * fontSdfUnitRange sdfTextFont,
+            scale = scale',
+            textOrigin = origin'
+          }
 
-  writeBuffer uniformsBuffer 0 [uniforms]
+    writeBuffer uniformsBuffer 0 [uniforms]
 
-  render $ do
-    vertexArray <- fmap (takeVertices (length textVertices)) . newVertexArray
-                     $ vertexBuffer
-    let primitiveArray = toPrimitiveArray TriangleList vertexArray
-        env = ShaderEnv {
-                  shaderTexture = fontGlyphTexture textFont,
-                  shaderPrimitives = primitiveArray,
-                  shaderUniforms = uniformsBuffer
-                }
-    shader env
+    render $ do
+      vertexArray <- fmap (takeVertices (length sdfTextVertices))
+                       . newVertexArray $ vertexBuffer
+      let primitiveArray = toPrimitiveArray TriangleList vertexArray
+          env = ShaderEnv {
+                    shaderTexture = fontGlyphTexture sdfTextFont,
+                    shaderPrimitives = primitiveArray,
+                    shaderUniforms = uniformsBuffer
+                  }
+      shader env

@@ -23,6 +23,7 @@ import App
 import App.Class
 import App.UI
 import App.Graphics as Graphics
+import App.Graphics.Text
 
 name :: String
 name = "Acts of Enclosure"
@@ -105,13 +106,17 @@ main = do
     -- General environment variables
     let env = Env eTick windowSize
 
+    -- UI environment
+    font <- loadFont
+    let uiEnv = UIEnv uiEvents' font
+
     -- Create the reflex FRP network.
     (((eQuit, eTickOut, scene), ui, uiTriggerMap), FireCommand fire) <-
         hostPerformEventT
         . flip runPostBuildT ePostBuild
         . flip runTriggerEventT eventsChan
         . flip runReaderT env
-        . runUiBuilderT uiEvents'
+        . runUiBuilderT uiEnv
         $ game
 
     -- Event handles - for reading current `Event` values, which may or may not
@@ -137,7 +142,8 @@ main = do
           (curX, curY) <- liftIO . readIORef $ mousePosRef
           -- Find the hovered element if there is one, 0 in the texture
           -- means nothing to click on
-          elemId <- readUiElemIdTexturePixel uiElemIdTexture curX curY
+          let (_, windowH) = windowSize
+          elemId <- readUiElemIdTexturePixel uiElemIdTexture curX (windowH - curY)
 
           mMouseMoveEvent <- liftIO . readIORef $ mouseMoveEventRef
           case mMouseMoveEvent of

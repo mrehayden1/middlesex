@@ -86,7 +86,7 @@ initialise :: (ctx ~ Handle, MonadAsyncException m)
   -> ContextT ctx os m (
          Window' os,
          WindowSize,
-         Scene -> [UIElem] -> ContextT ctx os m (),
+         Scene -> [UIElem os] -> ContextT ctx os m (),
          UIElemIDTexture os
        )
 initialise name = do
@@ -97,7 +97,6 @@ initialise name = do
                         windowHeight <|> fmap GLFW.videoModeHeight mVideoMode
       windowWidth'  = fromMaybe windowWidthFallback $
                         windowWidth <|> fmap GLFW.videoModeWidth mVideoMode
-
       windowSize    = (windowWidth', windowHeight')
 
   let windowConfig = WindowConfig {

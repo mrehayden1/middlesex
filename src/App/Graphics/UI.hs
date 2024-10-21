@@ -9,7 +9,7 @@ module App.Graphics.UI (
   UI(..),
   UIElem(..),
 
-  uiText,
+  uiSdfText,
 
   createRenderer,
 
@@ -26,8 +26,6 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Maybe
 import Control.Monad.Reader
 import Control.Monad.Writer
-import Foreign.Ptr
-import Foreign.Storable
 import qualified Data.List as L
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -37,7 +35,8 @@ import Graphics.GPipe
 import qualified Graphics.UI.GLFW as GLFW
 import Linear.Affine
 
-import App.Graphics.Text as Text
+import App.Graphics.Text hiding (Renderer)
+import qualified App.Graphics.Text as Text
 import App.Graphics.Texture
 import App.Graphics.Window
 import App.Math
@@ -57,13 +56,13 @@ import App.Math
 -- UI Container
 -- Centralises the element on the screen
 -- TODO: Add other anchors, e.g. bottom, top right, etc.
-newtype UI = UI UIElem
+newtype UI os = UI (UIElem os)
 
-data UIElem =
-    UIBanner String
-  | UIButton UIElemID String
-  | UICard UIElem
-  | UIColumn [UIElem]
+data UIElem os =
+    UIBanner (SDFText os)
+  | UIButton UIElemID (SDFText os)
+  | UICard (UIElem os)
+  | UIColumn [UIElem os]
   | UIEmpty
   | UISpacer Word
 
@@ -89,11 +88,11 @@ buttonNineSliceTexurePath = "assets/textures/ui/button-nine-slice.png"
 cardNineSliceTexturePath :: FilePath
 cardNineSliceTexturePath = "assets/textures/ui/card-nine-slice.png"
 
+-- Element ID texture, used for object picking
 type UIElemID = Word32
 
 type UIElemIDTexture os = Texture2D os (Format RWord)
 type UIElemIDImage = Image (Format RWord)
-
 
 readUiElemIdTexture :: (ContextHandler ctx, MonadAsyncException m)
   => UIElemIDTexture os
@@ -111,6 +110,7 @@ readUiElemIdTexturePixel :: (ContextHandler ctx, MonadAsyncException m)
   -> ContextT ctx os m UIElemID
 readUiElemIdTexturePixel tex x y =
   readPixelTexture2D tex 0 (V2 x y)
+
 
 type Shader' os = CompiledShader os (ShaderEnv os)
 
@@ -137,7 +137,7 @@ data RenderEnv ctx os m = RenderEnv {
     rendererElemIdTexture :: UIElemIDTexture os,
     rendererScale :: Float,
     rendererShader :: Shader' os,
-    rendererTextRenderer :: TextRenderer ctx os m,
+    rendererTextRenderer :: Text.Renderer ctx os m,
     rendererVertexBuffer :: Buffer os BVertex,
     rendererViewportSize :: V2 Float
   }
@@ -152,7 +152,7 @@ liftContextT = ReaderT . const
 createRenderer :: (ContextHandler ctx, MonadAsyncException m)
   => Window' os
   -> WindowSize
-  -> ContextT ctx os m (UI -> ContextT ctx os m (), UIElemIDTexture os)
+  -> ContextT ctx os m (UI os -> ContextT ctx os m (), UIElemIDTexture os)
 createRenderer window windowSize@(vw, vh) = do
 
   -- Calculate screen DPI and UI scale
@@ -249,7 +249,7 @@ createShader window (vw, vh) =
       0
 
 renderUi :: forall ctx os m. (ContextHandler ctx, MonadIO m, MonadException m)
-  => UI
+  => UI os
   -> Renderer ctx os m ()
 renderUi (UI el) = do
   V2 vw vh <- asks rendererViewportSize
@@ -258,15 +258,14 @@ renderUi (UI el) = do
       y = (vh - inH) / 2
   renderElem (P $ V2 x y) el
 
-elemSize :: Monad m => UIElem -> Renderer ctx os m (V2 Float)
-elemSize (UIBanner _) = do
+elemSize :: Monad m => UIElem os -> Renderer ctx os m (V2 Float)
+elemSize (UIBanner t) = do
   outerSz <- asks (nineSliceBorderSize . rendererBannerMaterial)
-  --innerSz <- bannerInnerSize t
-  let innerSz = 0
+  innerSz <- bannerInnerSize t
   return $ innerSz + outerSz
-elemSize (UIButton _ _) = do
+elemSize (UIButton _ t) = do
   outerSz <- asks (nineSliceBorderSize . rendererButtonMaterial)
-  innerSz <- buttonInnerSize undefined
+  innerSz <- buttonInnerSize t
   return $ innerSz + outerSz
 elemSize (UICard e) = do
   outerSz <- asks (nineSliceBorderSize . rendererCardMaterial)
@@ -280,30 +279,29 @@ elemSize (UIColumn es) = do
 elemSize UIEmpty       = return 0
 elemSize (UISpacer i)  = return . V2 0 . fromIntegral $ i
 
-bannerInnerSize :: Monad m => Text os -> Renderer ctx os m (V2 Float)
+bannerInnerSize :: Monad m => SDFText os -> Renderer ctx os m (V2 Float)
 bannerInnerSize t = do
   -- Buttons only scale horizontally, i.e. they have a fixed height
   (P (V2 _ height)) <- asks (uncurry subtract . nineSliceBoundaries
                                . rendererBannerMaterial)
-  -- Horizontal padding
-  let width = textWidth t + 320
+  -- Add horizontal padding
+  let width = sdfTextWidth t + 320
 
   return . V2 width . fromIntegral $ height
 
-buttonInnerSize :: Monad m => Text os -> Renderer ctx os m (V2 Float)
+buttonInnerSize :: Monad m => SDFText os -> Renderer ctx os m (V2 Float)
 buttonInnerSize t = do
   -- Buttons only scale horizontally, i.e. they have a fixed height
   (P (V2 _ height)) <- asks (uncurry subtract . nineSliceBoundaries
                                . rendererButtonMaterial)
-  --return $ V2 (textWidth t) (fromIntegral height)
-  return $ V2 0 (fromIntegral height)
+  return $ V2 (sdfTextWidth t) (fromIntegral height)
 
-cardInnerSize :: Monad m => UIElem -> Renderer ctx os m (V2 Float)
+cardInnerSize :: Monad m => UIElem os -> Renderer ctx os m (V2 Float)
 cardInnerSize = elemSize
 
 renderElem :: forall ctx os m. (ContextHandler ctx, MonadIO m, MonadException m)
   => Point V2 Float
-  -> UIElem
+  -> UIElem os
   -> Renderer ctx os m ()
 
 renderElem (P orig) (UIBanner t) = do
@@ -321,13 +319,13 @@ renderElem (P orig) (UIBanner t) = do
   -- Offset
   let V2 leftW topH = unP . fmap fromIntegral . fst . nineSliceBoundaries
                         $ nineSlice
-      textHeight'   = 0 --textHeight t
+      textHeight'   = sdfTextHeight t
       offsetV       = topH + (innerH - textHeight') / 2
 
-      textWidth'    = 0 --textWidth t
+      textWidth'    = sdfTextWidth t
       offsetH       = leftW + (innerW - textWidth') / 2
 
-  --liftContextT . renderText t (P (orig + V2 offsetH offsetV) ^* scale') $ scale'
+  liftContextT . renderText t (P (orig + V2 offsetH offsetV) ^* scale') $ scale'
   return ()
 
 renderElem (P orig) (UIButton i t) = do
@@ -337,17 +335,17 @@ renderElem (P orig) (UIButton i t) = do
   nineSlice <- asks rendererButtonMaterial
 
   -- Render button background
-  inner@(V2 _ innerH) <- buttonInnerSize undefined
-  renderNineSlice (Just . fromIntegral $ i) (P orig) inner nineSlice
+  inner@(V2 _ innerH) <- buttonInnerSize t
+  renderNineSlice (Just i) (P orig) inner nineSlice
 
   -- Render text
   -- Offset
   let V2 leftW topH = unP . fmap fromIntegral . fst . nineSliceBoundaries
                         $ nineSlice
-      textHeight'   = 0 --textHeight t
+      textHeight'   = sdfTextHeight t
       offsetV       = topH + (innerH - textHeight') / 2
 
-  --liftContextT . renderText t (P (orig + V2 leftW offsetV) ^* scale') $ scale'
+  liftContextT . renderText t (P (orig + V2 leftW offsetV) ^* scale') $ scale'
   return ()
 
 renderElem (P orig) (UICard el) = do
