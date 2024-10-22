@@ -150,12 +150,7 @@ createShader window (vw, vh) =
     let primitiveStream' = flip fmap primitiveStream $ \(V2 x y, uv) ->
           let vh'  = fromIntegral vh
               vw'  = fromIntegral vw
-              -- Transforms UI space into screen space then into NDC.
               proj = ortho 0 vw' 0 vh' 0 1
-                       !*! V4 (V4 1   0   0   0)
-                              (V4 0 (-1)  0 vh')
-                              (V4 0   0   1   0)
-                              (V4 0   0   0   1)
               modelM = Matrix.translate (V3 ox oy 0)
                          !*! Matrix.scale (V3 scale scale 0)
           in (proj !*! modelM !* V4 x y 0 1, uv)
@@ -237,12 +232,10 @@ uiSdfText font@Font{..} faceIx pixelSize colour str =
   glyphs = typefaceGlyphs face
   def    = fromMaybe defaultGlyphErr . IM.lookup (ord '?') $ glyphs
 
-  transform' cur = first $ fmap roundFloat . (^* pixelSize) . (+ V2 cur 0)
-                     . over _y (`subtract` lineHeight')
-                     . subtract (V2 0 descender')
+  transform' cur = first $ fmap roundFloat . (^* pixelSize)
+                     . (+ V2 cur (-descender'))
 
   metrics     = typefaceMetrics face
-  lineHeight' = lineHeight metrics
   descender'  = descender metrics
 
   defaultGlyphErr = error . printf msg $ faceIx

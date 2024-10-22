@@ -24,8 +24,10 @@ import App.Graphics.Text
 import App.Graphics.UI
 
 class UIBuilder t m | m -> t where
+  banner :: String -> m ()
   button :: String -> m (Event t ())
   card :: m a -> m a
+  layoutColumn :: m a -> m a
   uiEvents :: m (UIEvents t)
 
 type UIState os = (UIElemID, [UIElem os], TriggerMap)
@@ -55,16 +57,22 @@ runUiBuilderT :: MonadIO m
 runUiBuilderT e m = do
   (a, (_, es, triggerMap)) <-
     flip runStateT (1, [], empty) . flip runReaderT e . unUiBuilderT $ m
-  return (a, reverse es, triggerMap)
+  return (a, es, triggerMap)
 
 instance (Reflex t, TriggerEvent t m) => UIBuilder t (UIBuilderT t os m) where
+  banner str = do
+    (i, _, _) <- UIBuilderT get
+    font <- UIBuilderT $ asks uiEnvFont
+    let text = UIBanner . uiSdfText font typefaceIxLabel 320 (V4 0 0 0 1) $ str
+    UIBuilderT . modify $ \(_, els, ts) -> (succ i, text:els, ts)
+
   button str = do
     (i, _, _) <- UIBuilderT get
     font <- UIBuilderT $ asks uiEnvFont
-    let el = UIButton i . uiSdfText font typefaceIxLabel 128 (V4 1 1 1 1) $ str
+    let text = UIButton i . uiSdfText font typefaceIxLabel 128 (V4 1 1 1 1) $ str
     (clickE, clickTrigger) <- newTriggerEvent
     UIBuilderT . modify $ \(_, els, ts) ->
-      (succ i, el:els, insert i clickTrigger ts)
+      (succ i, text:els, insert i clickTrigger ts)
     return clickE
 
   card children = do
@@ -76,7 +84,21 @@ instance (Reflex t, TriggerEvent t m) => UIBuilder t (UIBuilderT t os m) where
         $ children
 
     UIBuilderT $ modify (\(_, els, ts) ->
-      let el = UICard . UIColumn . reverse $ childElems
+      let el = UICard . UIColumn $ childElems
+      in (i', el:els, ts <> childTriggers))
+
+    return a
+
+  layoutColumn children = do
+    env <- UIBuilderT ask
+    (i, _, _) <- UIBuilderT get
+
+    (a, (i', childElems, childTriggers)) <- lift
+        . flip runStateT (i, [], empty) . flip runReaderT env . unUiBuilderT
+        $ children
+
+    UIBuilderT $ modify (\(_, els, ts) ->
+      let el = UIColumn childElems
       in (i', el:els, ts <> childTriggers))
 
     return a
@@ -87,8 +109,10 @@ instance MonadTrans (UIBuilderT t os) where
   lift = UIBuilderT . lift . lift
 
 instance (Monad m, UIBuilder t m) => UIBuilder t (ReaderT e m) where
+  banner = lift . banner
   button = lift . button
   card cs = lift . card . runReaderT cs =<< ask
+  layoutColumn cs = lift . layoutColumn . runReaderT cs =<< ask
   uiEvents = lift uiEvents
 
 instance MonadReader e m => MonadReader e (UIBuilderT t os m) where

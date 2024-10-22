@@ -22,10 +22,12 @@ game = do
 
   UIEvents{..} <- uiEvents
 
-  eExit <- card $ do
-    _ <- button "Start"
-    _ <- button "Options"
-    button "Exit"
+  eExit <- layoutColumn $ do
+    banner "Acts of Enclosure"
+    card $ do
+      _ <- button "Start"
+      _ <- button "Options"
+      button "Exit"
 
   -- Map seed
   --let seed = 13011987

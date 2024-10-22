@@ -62,11 +62,11 @@ fromImageWithDecoder decode space maxLevels filePath = do
   let image@Image{..} = either error rgba8ImagefromDynamicImage . decode
                           $ bytes
       sz@(V2 w h)     = V2 imageWidth imageHeight
-      -- Load the pixels into the texture top to bottom and left to right so
-      -- that the UV-cordinates match the convention for pixel cordinates.
+      -- Load the pixels into the texture bottom to top and left to right so
+      -- that the UV-cordinates match OpenGL convention.
       pixels = [
           pixelToV4 . pixelAt image i $ j
-        | j <- [0..(h - 1)], i <- [0..(w - 1)]
+        | j <- reverse [0..(h - 1)], i <- [0..(w - 1)]
         ]
 
   let pixelFormat =
@@ -98,68 +98,38 @@ data NineSlice os = NineSlice {
 nineSliceBorderSize :: NineSlice os -> V2 Float
 nineSliceBorderSize NineSlice{..} =
   -- Border dimensions
-  let V2 leftW  topH    = unP . fst $ nineSliceBoundaries
-      V2 rightW bottomH = nineSliceSize - (unP . snd $ nineSliceBoundaries)
+  let V2 leftW  bottomH = unP . fst $ nineSliceBoundaries
+      V2 rightW topH    = nineSliceSize - (unP . snd $ nineSliceBoundaries)
 
-  in fromIntegral <$> V2 (leftW + rightW) (topH + bottomH)
+  in fromIntegral <$> V2 (leftW + rightW) (bottomH + topH)
 
 fromNineSlicePng :: (ContextHandler ctx, MonadIO m)
   => FilePath
-  -> (Point V2 Int, Point V2 Int)
+  -> Int
+  -> Int
+  -> Int
+  -> Int
   -> ContextT ctx os m (NineSlice os)
 fromNineSlicePng = fromNineSliceImageWithDecoder decodePng
 
--- Given two points which represent the boundaries of the nine slices of the
--- sprite texture, create a nine slice sprite.
--- NB: The two pixel co-ordinates should be zero-based and represent the upper
--- left.
+-- Given four values which represent the boundaries of the nine slices of the
+-- sprite texture.
+-- NB: The values must be zero-based pixel indices and in screen space
+-- (i.e. origin is top left) matching image editing software.
 fromNineSliceImageWithDecoder :: (ContextHandler ctx, MonadIO m)
   => (ByteString -> Either String DynamicImage)
   -> FilePath
-  -> (Point V2 Int, Point V2 Int)
+  -> Int
+  -> Int
+  -> Int
+  -> Int
   -> ContextT ctx os m (NineSlice os)
-fromNineSliceImageWithDecoder decode filePath boundaries = do
-  {-
-  bytes <- liftIO . BS.readFile $ filePath
-  let image@Image{..} = either error rgba8ImagefromDynamicImage . decode
-        $ bytes
-  let (p0, p1) = boundaries
-      P (V2 x0 y0) = p0
-      P (V2 x1 y1) = p1
-      sz@(V2 w h)     = V2 imageWidth imageHeight
-      sliceBounds = V.mkN [sliceBounds]
-        (P (V2  0  0), P (V2 (x0 - 1) (y0 - 1))) -- Top right
-        (P (V2 x0  0), P (V2 (x1 - 1) (y0 - 1))) -- Top
-        (P (V2 x1  0), P (V2 (w  - 1) (y0 - 1))) -- Top left
-        (P (V2  0 y0), P (V2 (x0 - 1) (y1 - 1))) -- Left
-        (P (V2 x0 y0), P (V2 (x1 - 1) (y1 - 1))) -- Centre
-        (P (V2 x1 y0), P (V2 (w  - 1) (y1 - 1))) -- Right
-        (P (V2  0 y1), P (V2 (x0 - 1) (h  - 1))) -- Bottom left
-        (P (V2 x0 y1), P (V2 (x1 - 1) (h  - 1))) -- Bottom
-        (P (V2 x1 y1), P (V2 (w  - 1) (h  - 1))) -- Bottom right
-  textures <- mapM (fromImageSlice' image) sliceBounds
-  -}
+fromNineSliceImageWithDecoder decode filePath x0 x1 y0 y1 = do
   -- Use up to 4 levels of mipmaps since we'll never likely render below 80dpi
   texture <- fromImageWithDecoder decode SRGB 4 filePath
-  let sz = head . texture2DSizes $ texture
+  let sz@(V2 _ h) = head . texture2DSizes $ texture
+      boundaries  = (P $ V2 x0 (h - y1 - 1), P $ V2 x1 (h - y0 - 1))
   return . NineSlice boundaries sz $ texture
-
-{-
-fromImageSlice' :: (ContextHandler ctx, MonadIO m)
-  => Image PixelRGBA8
-  -> (Point V2 Int, Point V2 Int)
-  -> ContextT ctx os m (Texture2D os (Format RGBAFloat))
-fromImageSlice' image (p0@(P (V2 x0 y0)), p1@(P (V2 x1 y1))) = do
-  let sz = unP . (+1) . subtract p0 $ p1
-      pixels = [
-            pixelToV4 . pixelAt image i $ j
-          | j <- [y0..y1], i <- [x0..x1]
-          ]
-  t <- newTexture2D SRGB8A8 sz maxBound
-  writeTexture2D t 0 0 sz pixels
-  generateTexture2DMipmap t
-  return t
--}
 
 -- A 1 pixel x 1 pixel white texture for use in material shaders which require
 -- an albedo texture.

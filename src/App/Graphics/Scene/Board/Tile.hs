@@ -78,12 +78,12 @@ tileVertices =
   -- Hexagon centre
   c  = (0           , V2 0.5  0.5 )
   -- The corners of the hexagon
-  ne = (hexNorthEast, V2 0    0.75)
-  n  = (hexNorth    , V2 0.5  1   )
-  nw = (hexNorthWest, V2 1    0.75)
-  se = (hexSouthEast, V2 0    0.25)
-  s  = (hexSouth    , V2 0.5  0   )
-  sw = (hexSouthWest, V2 1    0.25)
+  ne = (hexNorthEast, V2 0    0.25)
+  n  = (hexNorth    , V2 0.5  0   )
+  nw = (hexNorthWest, V2 1    0.25)
+  se = (hexSouthEast, V2 0    0.75)
+  s  = (hexSouth    , V2 0.5  1   )
+  sw = (hexSouthWest, V2 1    0.75)
 
   hexNorthEast = V2 (w / 2) (1 / 2)
    where

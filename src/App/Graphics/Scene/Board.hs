@@ -50,10 +50,10 @@ mapVertices =
   nw = (V2 ((-w / 2) - padding) (( h / 2) + padding), V2 0 0)
   -}
   --        x      y         u v
-  sw = (V2 (-0.5) (-0.5), V2 0 1)
-  se = (V2   0.5  (-0.5), V2 1 1)
-  ne = (V2   0.5    0.5 , V2 1 0)
-  nw = (V2 (-0.5)   0.5 , V2 0 0)
+  sw = (V2 (-0.5) (-0.5), V2 0 0)
+  se = (V2   0.5  (-0.5), V2 1 0)
+  ne = (V2   0.5    0.5 , V2 1 1)
+  nw = (V2 (-0.5)   0.5 , V2 0 1)
 
 mapInstances :: Board -> [M44 Float]
 mapInstances board =

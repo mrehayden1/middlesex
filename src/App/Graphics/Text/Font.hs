@@ -94,7 +94,7 @@ makeGlyph AtlasMeta{..} Glyph{..} =
  where
   makeQuad :: Bounds -> Bounds -> [GlyphVertex]
   makeQuad pBounds aBounds =
-    -- x, y - the glyph's quad geometry in ems
+    --  x, y - the glyph's quad geometry in ems
     let x0 = left pBounds
         x1 = right pBounds
         y0 = top pBounds
@@ -103,13 +103,13 @@ makeGlyph AtlasMeta{..} Glyph{..} =
         w = fromIntegral width
         h = fromIntegral height
 
-    -- u, v - the glyph's atlas texture co-ordinates in OpenGL uv space.
+    --  u, v - the glyph's atlas texture co-ordinates in OpenGL uv space.
         u0 = left aBounds / w
         u1 = right aBounds / w
 
         V2 v0 v1 = case yOrigin of
-          YTop    -> V2 (    top aBounds) (    bottom aBounds) ^/ h
-          YBottom -> V2 (h - top aBounds) (h - bottom aBounds) ^/ h
+          YBottom -> V2 (    top aBounds) (    bottom aBounds) ^/ h
+          YTop    -> V2 (h - top aBounds) (h - bottom aBounds) ^/ h
 
     in [ (V2 x0 y0, V2 u0 v0),
          (V2 x1 y1, V2 u1 v1),

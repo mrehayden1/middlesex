@@ -160,12 +160,9 @@ createRenderer window windowSize@(vw, vh) = do
   let scale' = dpi / textureDpi
 
   -- UI materials
-  bannerMaterial <- fromNineSlicePng bannerNineSliceTexurePath
-                      (P (V2 616 0), P (V2 830 888))
-  buttonMaterial <- fromNineSlicePng buttonNineSliceTexurePath
-                      (P (V2 252 32), P (V2 700 416))
-  cardMaterial <- fromNineSlicePng cardNineSliceTexturePath
-                    (P (V2 192 192), P (V2 212 212))
+  bannerMaterial <- fromNineSlicePng bannerNineSliceTexurePath 616 830 0   704
+  buttonMaterial <- fromNineSlicePng buttonNineSliceTexurePath 252 700 32  416
+  cardMaterial   <- fromNineSlicePng cardNineSliceTexturePath  192 212 192 212
 
   -- Pre-allocated buffers
   vertexBuffer :: Buffer os BVertex <- newBuffer maxVertices
@@ -218,7 +215,7 @@ createShader window (vw, vh) =
     let primitiveStream' = flip fmap primitiveStream $ \(V2 x y, uv, i) ->
           let vw' = fromIntegral vw
               vh' = fromIntegral vh
-              pos = ortho 0 vw' 0 vh' 0 zMax !* V4 x (vh' - y) 0 1
+              pos = ortho 0 vw' 0 vh' 0 zMax !* V4 x y 0 1
           in (pos, (uv, i))
 
     -- Fragment shader
@@ -226,7 +223,7 @@ createShader window (vw, vh) =
 
     fragmentStream <- flip rasterize primitiveStream'
       . const $
-          (Front,
+          (FrontAndBack,
            ViewPort (V2 0 0) (V2 vw vh),
            DepthRange 0 1
           )
@@ -258,47 +255,6 @@ renderUi (UI el) = do
       y = (vh - inH) / 2
   renderElem (P $ V2 x y) el
 
-elemSize :: Monad m => UIElem os -> Renderer ctx os m (V2 Float)
-elemSize (UIBanner t) = do
-  outerSz <- asks (nineSliceBorderSize . rendererBannerMaterial)
-  innerSz <- bannerInnerSize t
-  return $ innerSz + outerSz
-elemSize (UIButton _ t) = do
-  outerSz <- asks (nineSliceBorderSize . rendererButtonMaterial)
-  innerSz <- buttonInnerSize t
-  return $ innerSz + outerSz
-elemSize (UICard e) = do
-  outerSz <- asks (nineSliceBorderSize . rendererCardMaterial)
-  innerSz <- cardInnerSize e
-  return $ innerSz + outerSz
-elemSize (UIColumn es) = do
-  sizes <- mapM elemSize es
-  let width = L.foldl' (flip $ max . (^. _x)) 0 sizes
-      height = L.foldl' (flip $ (+) . (^. _y)) 0 sizes
-  return . V2 width $ height
-elemSize UIEmpty       = return 0
-elemSize (UISpacer i)  = return . V2 0 . fromIntegral $ i
-
-bannerInnerSize :: Monad m => SDFText os -> Renderer ctx os m (V2 Float)
-bannerInnerSize t = do
-  -- Buttons only scale horizontally, i.e. they have a fixed height
-  (P (V2 _ height)) <- asks (uncurry subtract . nineSliceBoundaries
-                               . rendererBannerMaterial)
-  -- Add horizontal padding
-  let width = sdfTextWidth t + 320
-
-  return . V2 width . fromIntegral $ height
-
-buttonInnerSize :: Monad m => SDFText os -> Renderer ctx os m (V2 Float)
-buttonInnerSize t = do
-  -- Buttons only scale horizontally, i.e. they have a fixed height
-  (P (V2 _ height)) <- asks (uncurry subtract . nineSliceBoundaries
-                               . rendererButtonMaterial)
-  return $ V2 (sdfTextWidth t) (fromIntegral height)
-
-cardInnerSize :: Monad m => UIElem os -> Renderer ctx os m (V2 Float)
-cardInnerSize = elemSize
-
 renderElem :: forall ctx os m. (ContextHandler ctx, MonadIO m, MonadException m)
   => Point V2 Float
   -> UIElem os
@@ -311,21 +267,20 @@ renderElem (P orig) (UIBanner t) = do
   scale' <- asks rendererScale
 
   -- Render banner background
-  --inner@(V2 innerW innerH) <- bannerInnerSize t
-  let inner@(V2 innerW innerH) = 0
-  renderNineSlice Nothing (P orig) inner nineSlice
+  innerSz@(V2 innerW innerH) <- bannerInnerSize t
+  renderNineSlice Nothing (P orig) innerSz nineSlice
 
   -- Render text
   -- Offset
-  let V2 leftW topH = unP . fmap fromIntegral . fst . nineSliceBoundaries
+  let V2 leftW botH = unP . fmap fromIntegral . fst . nineSliceBoundaries
                         $ nineSlice
       textHeight'   = sdfTextHeight t
-      offsetV       = topH + (innerH - textHeight') / 2
+      offsetY       = botH + (innerH - textHeight') / 2
 
       textWidth'    = sdfTextWidth t
-      offsetH       = leftW + (innerW - textWidth') / 2
+      offsetX       = leftW + (innerW - textWidth') / 2
 
-  liftContextT . renderText t (P (orig + V2 offsetH offsetV) ^* scale') $ scale'
+  liftContextT . renderText t (P (orig + V2 offsetX offsetY) ^* scale') $ scale'
   return ()
 
 renderElem (P orig) (UIButton i t) = do
@@ -335,25 +290,25 @@ renderElem (P orig) (UIButton i t) = do
   nineSlice <- asks rendererButtonMaterial
 
   -- Render button background
-  inner@(V2 _ innerH) <- buttonInnerSize t
-  renderNineSlice (Just i) (P orig) inner nineSlice
+  innerSz@(V2 _ innerH) <- buttonInnerSize t
+  renderNineSlice (Just i) (P orig) innerSz nineSlice
 
   -- Render text
   -- Offset
-  let V2 leftW topH = unP . fmap fromIntegral . fst . nineSliceBoundaries
+  let V2 leftW botH = unP . fmap fromIntegral . fst . nineSliceBoundaries
                         $ nineSlice
       textHeight'   = sdfTextHeight t
-      offsetV       = topH + (innerH - textHeight') / 2
+      offsetY       = botH + (innerH - textHeight') / 2
 
-  liftContextT . renderText t (P (orig + V2 leftW offsetV) ^* scale') $ scale'
+  liftContextT . renderText t (P (orig + V2 leftW offsetY) ^* scale') $ scale'
   return ()
 
 renderElem (P orig) (UICard el) = do
   nineSlice <- asks rendererCardMaterial
 
   -- Render card background
-  inner <- cardInnerSize el
-  renderNineSlice Nothing (P orig) inner nineSlice
+  innerSz <- cardInnerSize el
+  renderNineSlice Nothing (P orig) innerSz nineSlice
 
   -- Offset
   let V2 leftW topH = unP . fmap fromIntegral . fst . nineSliceBoundaries
@@ -390,8 +345,8 @@ renderNineSlice mElemId (P orig) (V2 innerW innerH) NineSlice{..} = do
   scale' <- asks rendererScale
 
   -- Sprite border slice dimensions
-  let V2 leftW  topH = unP . fmap fromIntegral . fst $ nineSliceBoundaries
-      V2 rightW botH = fmap fromIntegral
+  let V2 leftW  botH = unP . fmap fromIntegral . fst $ nineSliceBoundaries
+      V2 rightW topH = fmap fromIntegral
                          $ nineSliceSize - (unP . snd $ nineSliceBoundaries)
 
   let (V2 w h) = nineSliceSize
@@ -401,32 +356,32 @@ renderNineSlice mElemId (P orig) (V2 innerW innerH) NineSlice{..} = do
   let elemId = fromMaybe 0 mElemId
 
   let (vertices, numVertices) = execWriter $ do
-        -- Top left border
-        makeQuad elemId scale' orig leftW topH (V2 0 0) (V2 x0 y0)
-        -- Top border
-        let topOff = orig + V2 leftW 0
-        makeQuad elemId scale' topOff innerW topH (V2 x0 0) (V2 x1 y0)
-        -- Top right border
-        let topRightOff = orig + V2 (leftW + innerW) 0
-        makeQuad elemId scale' topRightOff rightW topH (V2 x1 0) (V2 w y0)
+        -- Bottom left border
+        makeQuad elemId scale' orig leftW botH (V2 0 0) (V2 x0 y0)
+        -- Bottom border
+        let botOff = orig + V2 leftW 0
+        makeQuad elemId scale' botOff innerW botH (V2 x0 0) (V2 x1 y0)
+        -- Bottom right border
+        let botRightOff = orig + V2 (leftW + innerW) 0
+        makeQuad elemId scale' botRightOff rightW botH (V2 x1 0) (V2 w y0)
         -- Left border
-        let leftOff = orig + V2 0 topH
+        let leftOff = orig + V2 0 botH
         makeQuad elemId scale' leftOff leftW innerH (V2 0 y0) (V2 x0 y1)
         -- Centre
-        let centreOff = orig + V2 leftW topH
+        let centreOff = orig + V2 leftW botH
         makeQuad elemId scale' centreOff innerW innerH (V2 x0 y0) (V2 x1 y1)
         -- Right border
-        let rightOff = orig + V2 (leftW + innerW) topH
+        let rightOff = orig + V2 (leftW + innerW) botH
         makeQuad elemId scale' rightOff rightW innerH (V2 x1 y0) (V2 w y1)
-        -- Bottom left border
-        let botLeftOff = orig + V2 0 (topH + innerH)
-        makeQuad elemId scale' botLeftOff leftW botH (V2 0 y1) (V2 x0 h)
-        -- Bottom border
-        let botOff = orig + V2 leftW (topH + innerH)
-        makeQuad elemId scale' botOff innerW botH (V2 x0 y1) (V2 x1 h)
-        -- Bottom right border
-        let botRightOff = orig + V2 (leftW + innerW) (topH + innerH)
-        makeQuad elemId scale' botRightOff rightW botH (V2 x1 y1) (V2 w h)
+        -- Top left border
+        let topLeftOff = orig + V2 0 (botH + innerH)
+        makeQuad elemId scale' topLeftOff leftW topH (V2 0 y1) (V2 x0 h)
+        -- Top border
+        let topOff = orig + V2 leftW (botH + innerH)
+        makeQuad elemId scale' topOff innerW topH (V2 x0 y1) (V2 x1 h)
+        -- Top right border
+        let topRightOff = orig + V2 (leftW + innerW) (botH + innerH)
+        makeQuad elemId scale' topRightOff rightW topH (V2 x1 y1) (V2 w h)
 
   liftContextT $ do
     writeBuffer vertexBuffer 0 vertices
@@ -494,6 +449,48 @@ renderNineSlice mElemId (P orig) (V2 innerW innerH) NineSlice{..} = do
     tell (vertices, Sum 6)
 
     return ()
+
+
+elemSize :: Monad m => UIElem os -> Renderer ctx os m (V2 Float)
+elemSize (UIBanner t) = do
+  outerSz <- asks (nineSliceBorderSize . rendererBannerMaterial)
+  innerSz <- bannerInnerSize t
+  return $ innerSz + outerSz
+elemSize (UIButton _ t) = do
+  outerSz <- asks (nineSliceBorderSize . rendererButtonMaterial)
+  innerSz <- buttonInnerSize t
+  return $ innerSz + outerSz
+elemSize (UICard e) = do
+  outerSz <- asks (nineSliceBorderSize . rendererCardMaterial)
+  innerSz <- cardInnerSize e
+  return $ innerSz + outerSz
+elemSize (UIColumn es) = do
+  sizes <- mapM elemSize es
+  let width = L.foldl' (flip $ max . (^. _x)) 0 sizes
+      height = L.foldl' (flip $ (+) . (^. _y)) 0 sizes
+  return . V2 width $ height
+elemSize UIEmpty       = return 0
+elemSize (UISpacer i)  = return . V2 0 . fromIntegral $ i
+
+bannerInnerSize :: Monad m => SDFText os -> Renderer ctx os m (V2 Float)
+bannerInnerSize t = do
+  -- Banners only scale horizontally, i.e. they have a fixed height
+  (P (V2 _ height)) <- asks (uncurry subtract . nineSliceBoundaries
+                         . rendererBannerMaterial)
+  -- Add horizontal padding
+  let width = sdfTextWidth t + 320
+
+  return . V2 width . fromIntegral $ height
+
+buttonInnerSize :: Monad m => SDFText os -> Renderer ctx os m (V2 Float)
+buttonInnerSize t = do
+  -- Buttons only scale horizontally, i.e. they have a fixed height
+  (P (V2 _ height)) <- asks (uncurry subtract . nineSliceBoundaries
+                               . rendererButtonMaterial)
+  return $ V2 (sdfTextWidth t) (fromIntegral height)
+
+cardInnerSize :: Monad m => UIElem os -> Renderer ctx os m (V2 Float)
+cardInnerSize = elemSize
 
 
 getDpi :: MaybeT IO Float
