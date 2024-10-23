@@ -22,7 +22,7 @@ game = do
 
   UIEvents{..} <- uiEvents
 
-  eExit <- layoutColumn $ do
+  eExit <- do
     banner "Acts of Enclosure"
     card $ do
       _ <- button "Start"

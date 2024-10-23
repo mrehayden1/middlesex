@@ -124,7 +124,7 @@ initialise name = do
         renderScene scene
         -- Clear the depth back buffer and render UI
         render $ clearWindowDepth window 1
-        renderUi . UI . UIColumn $ ui
+        renderUi . UI $ ui
 
   return (window, windowSize, doRender, elemIdMap)
 

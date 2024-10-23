@@ -2,6 +2,8 @@ module App.Graphics.Text (
   Font,
   loadFont,
 
+  TypefaceIx,
+
   typefaceIxLabel,
   typefaceIxBody,
   typefaceIxHeading,
@@ -9,6 +11,9 @@ module App.Graphics.Text (
 
   SDFText(sdfTextWidth),
   sdfTextHeight,
+
+  PixelSize,
+  Colour,
 
   uiSdfText,
 

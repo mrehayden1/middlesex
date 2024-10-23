@@ -5,10 +5,7 @@ module App.Class (
   DeltaT
 ) where
 
-import Control.Monad.Ref
 import Control.Monad.Reader
-import Data.IORef
-import Linear.Affine
 import Reflex
 import Reflex.Host.Class
 
@@ -24,7 +21,7 @@ type App os t m = (
     PerformEvent t m,
     TriggerEvent t m,
     MonadReader (Env os t) m,
-    UIBuilder t m
+    UIBuilder t os m
   )
 
 data Env os t = Env {
