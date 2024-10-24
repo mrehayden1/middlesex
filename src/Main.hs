@@ -106,7 +106,7 @@ main = do
     -- General environment variables
     let env = Env eTick windowSize
 
-    -- UI environment
+    -- UI builder environment
     font <- loadFont
     let uiEnv = UIEnv uiEvents' font
 
@@ -229,8 +229,9 @@ main = do
 
       when tickDone $ do
         scene' <- sample scene
+        ui' <- sample ui
         -- Render UI and scene
-        render scene' ui
+        render scene' ui'
         -- Swap buffers. Also polls the window for events which will trigger
         -- any GLFW callbacks.
         swapWindowBuffers window

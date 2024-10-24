@@ -6,17 +6,18 @@ module App.UI (
   UIEvents(..),
 
   UIBuilderT,
+  runUiBuilderT,
+
   UIEnv(..),
 
   banner,
   button,
-  card,
-
-  runUiBuilderT
+  card
 ) where
 
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.IORef
 import Data.Map
 import Linear
 import Linear.Affine
@@ -32,7 +33,13 @@ class UIBuilder t os m | m -> t, m -> os where
   uiEvents :: m (UIEvents t)
   text'    :: TypefaceIx -> PixelSize -> Colour -> String -> m (SDFText os)
 
-type UIState os = (UIElemID, [UIElem os], TriggerMap)
+
+newtype UIBuilderT t os m a = UIBuilderT {
+    unUiBuilderT :: ReaderT (IORef UIElemID, UIEnv t os) (StateT (UIState t os) m) a
+  }
+ deriving (Functor, Applicative, Monad, MonadIO, MonadFix)
+
+type UIState t os = ([Behavior t (UIElem os)], TriggerMap)
 
 type TriggerMap = Map UIElemID (() -> IO ())
 
@@ -47,46 +54,18 @@ data UIEvents t = UIEvents {
     eUnhandledMouseButton :: Event t (MouseButton, MouseButtonState)
   }
 
-newtype UIBuilderT t os m a = UIBuilderT {
-    unUiBuilderT :: ReaderT (UIEnv t os) (StateT (UIState os) m) a
-  }
- deriving (Functor, Applicative, Monad, MonadIO, MonadFix)
-
-runUiBuilderT :: MonadIO m
+runUiBuilderT :: (Reflex t, MonadIO m)
   => UIEnv t os
   -> UIBuilderT t os m a
-  -> m (a, [UIElem os], TriggerMap)
+  -> m (a, Behavior t [UIElem os], TriggerMap)
 runUiBuilderT e m = do
-  (a, (_, es, triggerMap)) <-
-    flip runStateT (1, [], empty) . flip runReaderT e . unUiBuilderT $ m
-  return (a, es, triggerMap)
-
-instance (Reflex t, TriggerEvent t m) => UIBuilder t os (UIBuilderT t os m) where
-  elem' el children = do
-    (i, _, _) <- UIBuilderT get
-    env <- UIBuilderT ask
-    (clickE, clickTrigger) <- newTriggerEvent
-
-    let i' = succ i
-
-    (a, (i'', childElems, childTriggers)) <- lift
-        . flip runStateT (i', [], empty) . flip runReaderT env . unUiBuilderT
-        $ children
-
-    UIBuilderT . modify $ \(_, els, ts) ->
-      let elems' = el i childElems : els
-          triggers = insert i clickTrigger ts <> childTriggers
-      in (i'', elems', triggers)
-
-    return (a, clickE)
-
-  text' faceIx sz colour str = do
-    font <- UIBuilderT $ asks uiEnvFont
-    return . uiSdfText font faceIx sz colour $ str
-
-  uiEvents = UIBuilderT $ asks uiEnvEvents
+  idRef <- liftIO $ newIORef 1
+  (a, (bs, triggerMap)) <-
+    flip runStateT ([], empty) . flip runReaderT (idRef, e) . unUiBuilderT $ m
+  return (a, sequence bs, triggerMap)
 
 
+-- Convenience UI builders for specific UI elements
 banner :: (UIBuilder t os m, Monad m) => String -> m ()
 banner str = do
   text <- fmap UIText . text' typefaceIxLabel 320 (V4 0 0 0 1) $ str
@@ -104,13 +83,45 @@ card :: Functor m => UIBuilder t os m => m a -> m a
 card children = do
   fmap fst . elem' (UINineSlice UIMaterialCard True True) $ children
 
-instance MonadTrans (UIBuilderT t os) where
-  lift = UIBuilderT . lift . lift
+
+-- Instances
+instance (Reflex t, TriggerEvent t m, MonadIO m) =>
+    UIBuilder t os (UIBuilderT t os m) where
+  elem' el children = do
+    (idRef, env) <- UIBuilderT ask
+    (clickE, clickTrigger) <- newTriggerEvent
+
+    -- This isn't atomic - does that matter?
+    i <- liftIO $ readIORef idRef
+    liftIO $ writeIORef idRef . succ $ i
+
+    (a, (childElems, childTriggers)) <- lift
+        . flip runStateT ([], empty)
+        . flip runReaderT (idRef, env)
+        . unUiBuilderT
+        $ children
+
+    UIBuilderT . modify $ \(els, ts) ->
+      let elems' = (fmap (el i) . sequence $ childElems) : els
+          triggers = insert i clickTrigger ts <> childTriggers
+      in (elems', triggers)
+
+    return (a, clickE)
+
+  text' faceIx sz colour str = do
+    font <- UIBuilderT $ asks (uiEnvFont . snd)
+    return . uiSdfText font faceIx sz colour $ str
+
+  uiEvents = UIBuilderT $ asks (uiEnvEvents . snd)
 
 instance (Monad m, UIBuilder t os m) => UIBuilder t os (ReaderT e m) where
   elem' e cs = lift . elem' e . runReaderT cs =<< ask
   text' t c sz = lift . text' t c sz
   uiEvents = lift uiEvents
+
+
+instance MonadTrans (UIBuilderT t os) where
+  lift = UIBuilderT . lift . lift
 
 instance MonadReader e m => MonadReader e (UIBuilderT t os m) where
   ask = lift ask
