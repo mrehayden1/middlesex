@@ -1,14 +1,16 @@
 module App.UI (
   UI(..),
+  UIElemID,
 
   UIBuilder(..),
-
-  UIEvents(..),
+  UIElemEvents(..),
+  UIElemEventType(..),
 
   UIBuilderT,
   runUiBuilderT,
 
   UIEnv(..),
+  UIEvents(..),
 
   banner,
   button,
@@ -17,6 +19,7 @@ module App.UI (
 
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bifunctor
 import Data.IORef
 import Data.Map
 import Linear
@@ -29,19 +32,27 @@ import App.Graphics.UI
 
 
 class UIBuilder t os m | m -> t, m -> os where
-  elem'    :: (UIElemID -> [UIElem os] -> UIElem os) -> m a -> m (a, Event t ())
+  elem'    :: (UIElemID -> [UIElem os] -> UIElem os) -> m a -> m (a, UIElemEvents t)
   uiEvents :: m (UIEvents t)
   text'    :: TypefaceIx -> PixelSize -> Colour -> String -> m (SDFText os)
 
+data UIElemEvents t = UIElemEvents {
+    click :: Event t (),
+    mouseOut :: Event t (),
+    mouseOver :: Event t ()
+  }
+
+data UIElemEventType = UIEventClick | UIEventMouseOut | UIEventMouseOver
+  deriving (Eq, Ord)
 
 newtype UIBuilderT t os m a = UIBuilderT {
     unUiBuilderT :: ReaderT (IORef UIElemID, UIEnv t os) (StateT (UIState t os) m) a
   }
  deriving (Functor, Applicative, Monad, MonadIO, MonadFix)
 
-type UIState t os = ([Behavior t (UIElem os)], TriggerMap)
+type UIState t os = (Behavior t [UIElem os], Behavior t TriggerMap)
 
-type TriggerMap = Map UIElemID (() -> IO ())
+type TriggerMap = Map (UIElemEventType, UIElemID) (() -> IO ())
 
 data UIEnv t os = UIEnv {
     uiEnvEvents :: UIEvents t,
@@ -57,12 +68,13 @@ data UIEvents t = UIEvents {
 runUiBuilderT :: (Reflex t, MonadIO m)
   => UIEnv t os
   -> UIBuilderT t os m a
-  -> m (a, Behavior t [UIElem os], TriggerMap)
+  -> m (a, Behavior t [UIElem os], Behavior t TriggerMap)
 runUiBuilderT e m = do
   idRef <- liftIO $ newIORef 1
-  (a, (bs, triggerMap)) <-
-    flip runStateT ([], empty) . flip runReaderT (idRef, e) . unUiBuilderT $ m
-  return (a, sequence bs, triggerMap)
+  (a, (elems', triggerMap)) <-
+    flip runStateT (pure [], pure empty) . flip runReaderT (idRef, e)
+      . unUiBuilderT $ m
+  return (a, elems', triggerMap)
 
 
 -- Convenience UI builders for specific UI elements
@@ -72,7 +84,7 @@ banner str = do
   let el = UINineSlice UIMaterialBanner True False
   void . elem' (const . flip el [text]) $ pure ()
 
-button :: (UIBuilder t os m, Monad m) => String -> m (Event t ())
+button :: (UIBuilder t os m, Monad m) => String -> m (UIElemEvents t)
 button str = do
   text <- fmap UIText . text' typefaceIxLabel 128 (V4 1 1 1 1) $ str
   fmap snd
@@ -89,24 +101,38 @@ instance (Reflex t, TriggerEvent t m, MonadIO m) =>
     UIBuilder t os (UIBuilderT t os m) where
   elem' el children = do
     (idRef, env) <- UIBuilderT ask
-    (clickE, clickTrigger) <- newTriggerEvent
 
     -- This isn't atomic - does that matter?
     i <- liftIO $ readIORef idRef
     liftIO $ writeIORef idRef . succ $ i
 
+    (clickE, clickTrigger) <- newTriggerEvent
+    (mouseOutE, mouseOutTrigger) <- newTriggerEvent
+    (mouseOverE, mouseOverTrigger) <- newTriggerEvent
+
+    let triggers = fromList [
+            ((UIEventClick    , i), clickTrigger    ),
+            ((UIEventMouseOut , i), mouseOutTrigger ),
+            ((UIEventMouseOver, i), mouseOverTrigger)
+          ]
+        events = UIElemEvents {
+            click = clickE,
+            mouseOut = mouseOutE,
+            mouseOver = mouseOverE
+          }
+
     (a, (childElems, childTriggers)) <- lift
-        . flip runStateT ([], empty)
-        . flip runReaderT (idRef, env)
-        . unUiBuilderT
-        $ children
+      . flip runStateT (pure [], pure empty)
+      . flip runReaderT (idRef, env)
+      . unUiBuilderT
+      $ children
 
     UIBuilderT . modify $ \(els, ts) ->
-      let elems' = (fmap (el i) . sequence $ childElems) : els
-          triggers = insert i clickTrigger ts <> childTriggers
-      in (elems', triggers)
+      let elems' = (:) <$> fmap (el i) childElems <*> els
+          triggers' = (<>) <$> fmap (triggers <>) childTriggers <*> ts
+      in (elems', triggers')
 
-    return (a, clickE)
+    return (a, events)
 
   text' faceIx sz colour str = do
     font <- UIBuilderT $ asks (uiEnvFont . snd)
@@ -162,3 +188,16 @@ instance TriggerEvent t m => TriggerEvent t (UIBuilderT t os m) where
   {-# INLINABLE newEventWithLazyTriggerWithOnComplete #-}
   newEventWithLazyTriggerWithOnComplete f =
     lift $ newEventWithLazyTriggerWithOnComplete f
+
+instance (Adjustable t m, MonadHold t m) => Adjustable t (UIBuilderT t os m) where
+  runWithReplace a0 a' = do
+    e <- UIBuilderT ask
+    (result0, result') <- lift $
+      runWithReplace
+        (flip runStateT (pure [], pure empty) . flip runReaderT e . unUiBuilderT  $  a0)
+        (flip runStateT (pure [], pure empty) . flip runReaderT e . unUiBuilderT <$> a')
+    o <- hold (snd result0) $ fmapCheap snd result'
+    let elems' = fst =<< o
+        triggers = snd =<< o
+    UIBuilderT . modify . bimap (liftM2 (<>) elems') $ liftM2 (<>) triggers
+    return (fst result0, fmapCheap fst result')

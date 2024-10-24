@@ -10,6 +10,7 @@ import Data.Bool
 import Linear
 import Linear.Affine
 import Reflex
+import Reflex.Workflow
 
 import App.Class
 import App.Game.Board
@@ -22,12 +23,7 @@ game = do
 
   UIEvents{..} <- uiEvents
 
-  eExit <- do
-    banner "Acts of Enclosure"
-    card $ do
-      _ <- button "Start"
-      _ <- button "Options"
-      button "Exit"
+  eExit <- fmap switchDyn . workflow $ mainMenu
 
   -- Map seed
   --let seed = 13011987
@@ -135,3 +131,22 @@ screenMapCoords viewportWidth viewportHeight cam (P (V2 cursorX cursorY)) =
   -- Inverse viewport transformation
   toNdc :: Float -> Float -> Float
   toNdc dim x = 2 * (x - (dim / 2)) / dim
+
+
+mainMenu :: App os t m => Workflow t m (Event t ())
+mainMenu = Workflow $ do
+  banner "Acts of Enclosure"
+  card $ do
+    _ <- button "Start"
+    o <- button "Options"
+    e <- button "Exit"
+    return (click e, optionsMenu <$ click o)
+
+optionsMenu :: App os t m => Workflow t m (Event t ())
+optionsMenu = Workflow $ do
+  banner "Options"
+  e <- card $ do
+    c <- button "Cancel"
+    s <- button "Save"
+    return . leftmost $ [click c, click s]
+  return (never, mainMenu <$ e)

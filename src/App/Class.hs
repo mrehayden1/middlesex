@@ -12,15 +12,16 @@ import Reflex.Host.Class
 import App.UI
 
 type App os t m = (
-    ReflexHost t,
+    Adjustable t m,
+    MonadFix m,
     MonadIO m,
     MonadIO (Performable m),
-    MonadFix m,
-    PostBuild t m,
     MonadHold t m,
-    PerformEvent t m,
-    TriggerEvent t m,
     MonadReader (Env os t) m,
+    PerformEvent t m,
+    PostBuild t m,
+    ReflexHost t,
+    TriggerEvent t m,
     UIBuilder t os m
   )
 

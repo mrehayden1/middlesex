@@ -79,9 +79,14 @@ main = do
 
     -- Last mouse position stored for UI click processing.
     mousePosRef :: IORef (Int, Int) <- liftIO . newIORef $ (0, 0)
-    -- Mouse move events - coalesced into the latest move in the frame
+    -- Mouse moves - coalesced into the latest move in the frame.
+    -- This is distinct from the mouse position, because a mouse mave not move
+    -- in the current frame.
     mouseMoveEventRef :: IORef (Maybe (Int, Int))
       <- liftIO . newIORef $ Nothing
+    -- Hovered element reference. Used to know when to trigger hover and blur
+    -- events.
+    hoveredElemRef :: IORef UIElemID <- liftIO . newIORef $ 0
 
     _ <- setCursorPosCallback window . Just $ \x y -> do
            -- Round off any subpixel sampling
@@ -146,22 +151,46 @@ main = do
           elemId <- readUiElemIdTexturePixel uiElemIdTexture curX
                       $ windowH - curY - 1
 
+          -- Sample the current trigger map of the UI.
+          uiTriggerMap' <- sample uiTriggerMap
+
           mMouseMoveEvent <- liftIO . readIORef $ mouseMoveEventRef
           case mMouseMoveEvent of
             Just (x, y) -> liftIO $ do
               writeIORef mouseMoveEventRef Nothing
-              -- TODO trigger elem hover event
+              -- Trigger global cursor position event
               cursorPosTrigger . P . V2 x $ y
             Nothing -> return ()
+
+          -- Trigger elem hover events. Note that this can change even if the
+          -- mouse hasn't moved.
+          --
+          -- Compare the previously hovered element to the current, if it has
+          -- changed trigger the hover events.
+          hoveredElemId <- liftIO $ readIORef hoveredElemRef
+          -- Mouse over
+          when (hoveredElemId /= elemId) $ do
+            when (hoveredElemId /= 0) $
+              liftIO . mapM_ ($ ())
+                $ uiTriggerMap' !? (UIEventMouseOut, hoveredElemId)
+          -- Mouse out
+            when (elemId /= 0) $
+              liftIO . mapM_ ($ ())
+                $ uiTriggerMap' !? (UIEventMouseOver, elemId)
+
+          -- Update the hovered element
+          liftIO . writeIORef hoveredElemRef $ elemId
 
           -- Events were collected in reverse.
           events <- liftIO . fmap reverse . atomicSwapIORef inputEventsRef $ []
           forM_ events $ \case
-            KeyEvent k ks         -> liftIO . unhandledKeyTrigger $ (k, ks)
+            KeyEvent k ks -> liftIO . unhandledKeyTrigger $ (k, ks)
             MouseButtonEvent b bs -> liftIO $ do
               case elemId of
                 0 -> unhandledMouseButtonTrigger (b, bs)
-                _ -> mapM_ ($ ()) $ uiTriggerMap !? elemId
+                _ -> do
+                  when (b == MouseButton'1 && bs == MouseButtonState'Pressed) $
+                    mapM_ ($ ()) $ uiTriggerMap' !? (UIEventClick, elemId)
 
     let doTick = liftIO $ do
           now' <- getCurrentTime
